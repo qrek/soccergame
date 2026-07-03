@@ -372,6 +372,189 @@ const PLAYERS = [
   { n: "Antonio Valencia", c: "Équateur", code: "EC", pos: "MID", r: 82, d: "2010s" },
   // Grèce
   { n: "Theodoros Zagorakis", c: "Grèce", code: "GR", pos: "MID", r: 82, d: "2000s" },
+
+  // ===================== PROFONDEUR D'EFFECTIF PAR NATION =====================
+  // Russie
+  { n: "Igor Akinfeev", c: "Russie", code: "RU", pos: "GK", r: 84, d: "2010s" },
+  { n: "Sergei Ignashevich", c: "Russie", code: "RU", pos: "DEF", r: 82, d: "2010s" },
+  { n: "Alexander Mostovoi", c: "Russie", code: "RU", pos: "MID", r: 83, d: "2000s" },
+  { n: "Aleksandr Kerzhakov", c: "Russie", code: "RU", pos: "FWD", r: 82, d: "2010s" },
+  { n: "Valeri Karpin", c: "Russie", code: "RU", pos: "MID", r: 82, d: "2000s" },
+  // URSS
+  { n: "Igor Belanov", c: "URSS", code: "RU", pos: "FWD", r: 85, d: "1980s" },
+  { n: "Anatoliy Demyanenko", c: "URSS", code: "RU", pos: "DEF", r: 83, d: "1980s" },
+  { n: "Alexander Zavarov", c: "URSS", code: "RU", pos: "MID", r: 84, d: "1980s" },
+  // Irlande du Nord
+  { n: "Pat Jennings", c: "Irlande du Nord", code: "GB", pos: "GK", r: 86, d: "1980s" },
+  { n: "Jonny Evans", c: "Irlande du Nord", code: "GB", pos: "DEF", r: 80, d: "2010s" },
+  { n: "Steven Davis", c: "Irlande du Nord", code: "GB", pos: "MID", r: 80, d: "2010s" },
+  { n: "David Healy", c: "Irlande du Nord", code: "GB", pos: "FWD", r: 79, d: "2010s" },
+  // Bulgarie
+  { n: "Dimitar Berbatov", c: "Bulgarie", code: "BG", pos: "FWD", r: 86, d: "2000s" },
+  { n: "Krasimir Balakov", c: "Bulgarie", code: "BG", pos: "MID", r: 84, d: "1990s" },
+  { n: "Trifon Ivanov", c: "Bulgarie", code: "BG", pos: "DEF", r: 82, d: "1990s" },
+  { n: "Borislav Mihaylov", c: "Bulgarie", code: "BG", pos: "GK", r: 81, d: "1990s" },
+  // Roumanie
+  { n: "Gheorghe Popescu", c: "Roumanie", code: "RO", pos: "DEF", r: 85, d: "1990s" },
+  { n: "Dan Petrescu", c: "Roumanie", code: "RO", pos: "DEF", r: 83, d: "1990s" },
+  { n: "Adrian Mutu", c: "Roumanie", code: "RO", pos: "FWD", r: 84, d: "2000s" },
+  { n: "Bogdan Stelea", c: "Roumanie", code: "RO", pos: "GK", r: 81, d: "1990s" },
+  { n: "Cristian Chivu", c: "Roumanie", code: "RO", pos: "DEF", r: 83, d: "2000s" },
+  // Ukraine
+  { n: "Oleksandr Zinchenko", c: "Ukraine", code: "UA", pos: "DEF", r: 82, d: "2020s" },
+  { n: "Andriy Yarmolenko", c: "Ukraine", code: "UA", pos: "FWD", r: 83, d: "2010s" },
+  { n: "Serhiy Rebrov", c: "Ukraine", code: "UA", pos: "FWD", r: 83, d: "2000s" },
+  { n: "Anatoliy Tymoshchuk", c: "Ukraine", code: "UA", pos: "MID", r: 83, d: "2010s" },
+  { n: "Andriy Pyatov", c: "Ukraine", code: "UA", pos: "GK", r: 81, d: "2010s" },
+  // Égypte
+  { n: "Essam El-Hadary", c: "Égypte", code: "EG", pos: "GK", r: 82, d: "2000s" },
+  { n: "Mohamed Aboutrika", c: "Égypte", code: "EG", pos: "MID", r: 84, d: "2000s" },
+  { n: "Ahmed Hegazi", c: "Égypte", code: "EG", pos: "DEF", r: 80, d: "2010s" },
+  { n: "Trézéguet", c: "Égypte", code: "EG", pos: "FWD", r: 80, d: "2020s" },
+  // Sénégal
+  { n: "El Hadji Diouf", c: "Sénégal", code: "SN", pos: "FWD", r: 84, d: "2000s" },
+  { n: "Kalidou Koulibaly", c: "Sénégal", code: "SN", pos: "DEF", r: 86, d: "2020s" },
+  { n: "Édouard Mendy", c: "Sénégal", code: "SN", pos: "GK", r: 85, d: "2020s" },
+  { n: "Idrissa Gueye", c: "Sénégal", code: "SN", pos: "MID", r: 83, d: "2020s" },
+  { n: "Papa Bouba Diop", c: "Sénégal", code: "SN", pos: "MID", r: 81, d: "2000s" },
+  // Côte d'Ivoire
+  { n: "Kolo Touré", c: "Côte d'Ivoire", code: "CI", pos: "DEF", r: 84, d: "2010s" },
+  { n: "Gervinho", c: "Côte d'Ivoire", code: "CI", pos: "FWD", r: 82, d: "2010s" },
+  { n: "Boubacar Barry", c: "Côte d'Ivoire", code: "CI", pos: "GK", r: 79, d: "2010s" },
+  { n: "Wilfried Zaha", c: "Côte d'Ivoire", code: "CI", pos: "FWD", r: 82, d: "2020s" },
+  // Ghana
+  { n: "André Ayew", c: "Ghana", code: "GH", pos: "FWD", r: 82, d: "2020s" },
+  { n: "Sulley Muntari", c: "Ghana", code: "GH", pos: "MID", r: 82, d: "2010s" },
+  { n: "John Mensah", c: "Ghana", code: "GH", pos: "DEF", r: 81, d: "2010s" },
+  { n: "Richard Kingson", c: "Ghana", code: "GH", pos: "GK", r: 78, d: "2010s" },
+  // Nigeria
+  { n: "Vincent Enyeama", c: "Nigeria", code: "NG", pos: "GK", r: 83, d: "2010s" },
+  { n: "Taribo West", c: "Nigeria", code: "NG", pos: "DEF", r: 81, d: "2000s" },
+  { n: "Sunday Oliseh", c: "Nigeria", code: "NG", pos: "MID", r: 82, d: "1990s" },
+  { n: "Wilfred Ndidi", c: "Nigeria", code: "NG", pos: "MID", r: 82, d: "2020s" },
+  // Cameroun
+  { n: "Marc-Vivien Foé", c: "Cameroun", code: "CM", pos: "MID", r: 83, d: "2000s" },
+  { n: "André Onana", c: "Cameroun", code: "CM", pos: "GK", r: 84, d: "2020s" },
+  { n: "Geremi", c: "Cameroun", code: "CM", pos: "DEF", r: 81, d: "2000s" },
+  // Algérie
+  { n: "Islam Slimani", c: "Algérie", code: "DZ", pos: "FWD", r: 81, d: "2020s" },
+  { n: "Sofiane Feghouli", c: "Algérie", code: "DZ", pos: "MID", r: 81, d: "2010s" },
+  { n: "Raïs M'Bolhi", c: "Algérie", code: "DZ", pos: "GK", r: 80, d: "2010s" },
+  { n: "Aïssa Mandi", c: "Algérie", code: "DZ", pos: "DEF", r: 80, d: "2020s" },
+  // Maroc
+  { n: "Youssef En-Nesyri", c: "Maroc", code: "MA", pos: "FWD", r: 82, d: "2020s" },
+  { n: "Sofyan Amrabat", c: "Maroc", code: "MA", pos: "MID", r: 82, d: "2020s" },
+  { n: "Mustapha Hadji", c: "Maroc", code: "MA", pos: "MID", r: 82, d: "1990s" },
+  { n: "Noussair Mazraoui", c: "Maroc", code: "MA", pos: "DEF", r: 81, d: "2020s" },
+  // États-Unis
+  { n: "Tim Howard", c: "États-Unis", code: "US", pos: "GK", r: 84, d: "2010s" },
+  { n: "Clint Dempsey", c: "États-Unis", code: "US", pos: "FWD", r: 83, d: "2010s" },
+  { n: "Claudio Reyna", c: "États-Unis", code: "US", pos: "MID", r: 82, d: "2000s" },
+  { n: "DaMarcus Beasley", c: "États-Unis", code: "US", pos: "DEF", r: 80, d: "2010s" },
+  // Mexique
+  { n: "Jorge Campos", c: "Mexique", code: "MX", pos: "GK", r: 82, d: "1990s" },
+  { n: "Cuauhtémoc Blanco", c: "Mexique", code: "MX", pos: "MID", r: 84, d: "2000s" },
+  { n: "Andrés Guardado", c: "Mexique", code: "MX", pos: "MID", r: 82, d: "2010s" },
+  { n: "Claudio Suárez", c: "Mexique", code: "MX", pos: "DEF", r: 82, d: "2000s" },
+  { n: "Hirving Lozano", c: "Mexique", code: "MX", pos: "FWD", r: 82, d: "2020s" },
+  // Équateur
+  { n: "Alberto Spencer", c: "Équateur", code: "EC", pos: "FWD", r: 85, d: "1960s" },
+  { n: "Agustín Delgado", c: "Équateur", code: "EC", pos: "FWD", r: 80, d: "2000s" },
+  { n: "Iván Hurtado", c: "Équateur", code: "EC", pos: "DEF", r: 79, d: "2000s" },
+  { n: "Moisés Caicedo", c: "Équateur", code: "EC", pos: "MID", r: 83, d: "2020s" },
+  { n: "Alexander Domínguez", c: "Équateur", code: "EC", pos: "GK", r: 78, d: "2020s" },
+  // Pérou
+  { n: "Claudio Pizarro", c: "Pérou", code: "PE", pos: "FWD", r: 83, d: "2010s" },
+  { n: "Nolberto Solano", c: "Pérou", code: "PE", pos: "MID", r: 81, d: "2000s" },
+  { n: "Pedro Gallese", c: "Pérou", code: "PE", pos: "GK", r: 79, d: "2020s" },
+  // Chili
+  { n: "Gary Medel", c: "Chili", code: "CL", pos: "DEF", r: 82, d: "2010s" },
+  { n: "Charles Aránguiz", c: "Chili", code: "CL", pos: "MID", r: 82, d: "2010s" },
+  // Colombie
+  { n: "Mario Yepes", c: "Colombie", code: "CO", pos: "DEF", r: 82, d: "2010s" },
+  { n: "David Ospina", c: "Colombie", code: "CO", pos: "GK", r: 82, d: "2010s" },
+  { n: "Juan Cuadrado", c: "Colombie", code: "CO", pos: "MID", r: 82, d: "2020s" },
+  // Paraguay
+  { n: "Carlos Gamarra", c: "Paraguay", code: "PY", pos: "DEF", r: 83, d: "2000s" },
+  { n: "Julio César Romero", c: "Paraguay", code: "PY", pos: "MID", r: 84, d: "1980s" },
+  { n: "Justo Villar", c: "Paraguay", code: "PY", pos: "GK", r: 80, d: "2010s" },
+  { n: "Óscar Cardozo", c: "Paraguay", code: "PY", pos: "FWD", r: 81, d: "2010s" },
+  // Turquie
+  { n: "Arda Turan", c: "Turquie", code: "TR", pos: "MID", r: 84, d: "2010s" },
+  { n: "Emre Belözoğlu", c: "Turquie", code: "TR", pos: "MID", r: 82, d: "2000s" },
+  { n: "Alpay Özalan", c: "Turquie", code: "TR", pos: "DEF", r: 81, d: "2000s" },
+  { n: "Nihat Kahveci", c: "Turquie", code: "TR", pos: "FWD", r: 82, d: "2000s" },
+  // Suisse
+  { n: "Stéphane Chapuisat", c: "Suisse", code: "CH", pos: "FWD", r: 84, d: "1990s" },
+  { n: "Yann Sommer", c: "Suisse", code: "CH", pos: "GK", r: 84, d: "2020s" },
+  { n: "Ricardo Rodríguez", c: "Suisse", code: "CH", pos: "DEF", r: 81, d: "2020s" },
+  { n: "Alexander Frei", c: "Suisse", code: "CH", pos: "FWD", r: 82, d: "2000s" },
+  // Corée du Sud
+  { n: "Cha Bum-kun", c: "Corée du Sud", code: "KR", pos: "FWD", r: 85, d: "1980s" },
+  { n: "Ki Sung-yueng", c: "Corée du Sud", code: "KR", pos: "MID", r: 82, d: "2010s" },
+  { n: "Lee Young-pyo", c: "Corée du Sud", code: "KR", pos: "DEF", r: 80, d: "2000s" },
+  { n: "Cho Hyun-woo", c: "Corée du Sud", code: "KR", pos: "GK", r: 80, d: "2020s" },
+  // Japon
+  { n: "Shinji Kagawa", c: "Japon", code: "JP", pos: "MID", r: 83, d: "2010s" },
+  { n: "Yuto Nagatomo", c: "Japon", code: "JP", pos: "DEF", r: 81, d: "2010s" },
+  { n: "Eiji Kawashima", c: "Japon", code: "JP", pos: "GK", r: 80, d: "2010s" },
+  { n: "Takumi Minamino", c: "Japon", code: "JP", pos: "FWD", r: 81, d: "2020s" },
+  // Australie
+  { n: "Harry Kewell", c: "Australie", code: "AU", pos: "FWD", r: 84, d: "2000s" },
+  { n: "Mark Viduka", c: "Australie", code: "AU", pos: "FWD", r: 83, d: "2000s" },
+  { n: "Lucas Neill", c: "Australie", code: "AU", pos: "DEF", r: 80, d: "2010s" },
+  { n: "Aaron Mooy", c: "Australie", code: "AU", pos: "MID", r: 80, d: "2020s" },
+  // Écosse
+  { n: "Graeme Souness", c: "Écosse", code: "GB", pos: "MID", r: 86, d: "1980s" },
+  { n: "Jim Baxter", c: "Écosse", code: "GB", pos: "MID", r: 85, d: "1960s" },
+  { n: "Andy Goram", c: "Écosse", code: "GB", pos: "GK", r: 82, d: "1990s" },
+  { n: "Danny McGrain", c: "Écosse", code: "GB", pos: "DEF", r: 83, d: "1970s" },
+  { n: "Ally McCoist", c: "Écosse", code: "GB", pos: "FWD", r: 83, d: "1990s" },
+  // Pays de Galles
+  { n: "Neville Southall", c: "Pays de Galles", code: "GB", pos: "GK", r: 85, d: "1990s" },
+  { n: "Aaron Ramsey", c: "Pays de Galles", code: "GB", pos: "MID", r: 83, d: "2010s" },
+  { n: "Ashley Williams", c: "Pays de Galles", code: "GB", pos: "DEF", r: 81, d: "2010s" },
+  // Irlande
+  { n: "Paul McGrath", c: "Irlande", code: "IE", pos: "DEF", r: 85, d: "1990s" },
+  { n: "Liam Brady", c: "Irlande", code: "IE", pos: "MID", r: 85, d: "1980s" },
+  { n: "Shay Given", c: "Irlande", code: "IE", pos: "GK", r: 83, d: "2000s" },
+  { n: "Damien Duff", c: "Irlande", code: "IE", pos: "FWD", r: 83, d: "2000s" },
+  // Autriche
+  { n: "Herbert Prohaska", c: "Autriche", code: "AT", pos: "MID", r: 84, d: "1980s" },
+  { n: "Toni Polster", c: "Autriche", code: "AT", pos: "FWD", r: 83, d: "1990s" },
+  { n: "Marko Arnautović", c: "Autriche", code: "AT", pos: "FWD", r: 82, d: "2020s" },
+  { n: "Michael Konsel", c: "Autriche", code: "AT", pos: "GK", r: 80, d: "1990s" },
+  { n: "Christian Fuchs", c: "Autriche", code: "AT", pos: "DEF", r: 80, d: "2010s" },
+  // Grèce
+  { n: "Angelos Charisteas", c: "Grèce", code: "GR", pos: "FWD", r: 81, d: "2000s" },
+  { n: "Giorgos Karagounis", c: "Grèce", code: "GR", pos: "MID", r: 82, d: "2000s" },
+  { n: "Traianos Dellas", c: "Grèce", code: "GR", pos: "DEF", r: 81, d: "2000s" },
+  { n: "Antonis Nikopolidis", c: "Grèce", code: "GR", pos: "GK", r: 81, d: "2000s" },
+  // Suède
+  { n: "Andreas Isaksson", c: "Suède", code: "SE", pos: "GK", r: 82, d: "2010s" },
+  { n: "Fredrik Ljungberg", c: "Suède", code: "SE", pos: "MID", r: 84, d: "2000s" },
+  { n: "Olof Mellberg", c: "Suède", code: "SE", pos: "DEF", r: 82, d: "2000s" },
+  { n: "Tomas Brolin", c: "Suède", code: "SE", pos: "FWD", r: 84, d: "1990s" },
+  // Serbie / Yougoslavie
+  { n: "Dragan Stojković", c: "Yougoslavie", code: "RS", pos: "MID", r: 86, d: "1990s" },
+  { n: "Safet Sušić", c: "Yougoslavie", code: "RS", pos: "MID", r: 85, d: "1980s" },
+  { n: "Vladimir Beara", c: "Yougoslavie", code: "RS", pos: "GK", r: 84, d: "1950s" },
+  { n: "Aleksandar Mitrović", c: "Serbie", code: "RS", pos: "FWD", r: 82, d: "2020s" },
+  { n: "Branislav Ivanović", c: "Serbie", code: "RS", pos: "DEF", r: 84, d: "2010s" },
+  // République tchèque
+  { n: "Tomáš Rosický", c: "Rép. tchèque", code: "CZ", pos: "MID", r: 85, d: "2000s" },
+  { n: "Milan Baroš", c: "Rép. tchèque", code: "CZ", pos: "FWD", r: 82, d: "2000s" },
+  { n: "Karel Poborský", c: "Rép. tchèque", code: "CZ", pos: "MID", r: 83, d: "1990s" },
+  { n: "Tomáš Ujfaluši", c: "Rép. tchèque", code: "CZ", pos: "DEF", r: 82, d: "2000s" },
+  // Costa Rica
+  { n: "Bryan Ruiz", c: "Costa Rica", code: "CR", pos: "MID", r: 82, d: "2010s" },
+  { n: "Paulo Wanchope", c: "Costa Rica", code: "CR", pos: "FWD", r: 81, d: "2000s" },
+  { n: "Celso Borges", c: "Costa Rica", code: "CR", pos: "MID", r: 79, d: "2010s" },
+  { n: "Giancarlo González", c: "Costa Rica", code: "CR", pos: "DEF", r: 79, d: "2010s" },
+  { n: "Joel Campbell", c: "Costa Rica", code: "CR", pos: "FWD", r: 79, d: "2020s" },
+  // Autres légendes
+  { n: "Hristo Bonev", c: "Bulgarie", code: "BG", pos: "MID", r: 82, d: "1970s" },
+  { n: "Emmanuel Amunike", c: "Nigeria", code: "NG", pos: "FWD", r: 81, d: "1990s" },
 ];
 
 if (typeof module !== "undefined" && module.exports) {

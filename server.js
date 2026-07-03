@@ -367,6 +367,24 @@ const ACTIONS = {
     resetRoom(room);
     return { ok: true };
   },
+  // Quitter la session depuis le salon (l'hôte est transféré si besoin).
+  leaveRoom(msg) {
+    const room = rooms.get(msg.code);
+    const player = room && playerByPid(room, msg.pid);
+    if (!room || !player) return { ok: false };
+    if (room.phase === "lobby") {
+      room.players = room.players.filter((p) => p.pid !== msg.pid);
+      const res = room.clients.get(msg.pid);
+      if (res) { try { res.end(); } catch (_) {} room.clients.delete(msg.pid); }
+      if (!room.players.length) { rooms.delete(room.code); return { ok: true }; }
+      if (room.hostPid === msg.pid) room.hostPid = room.players[0].pid;
+      broadcast(room);
+    } else {
+      player.connected = false; // en cours de partie : on le note absent
+      broadcast(room);
+    }
+    return { ok: true };
+  },
   skipReveal(msg) {
     const room = rooms.get(msg.code);
     if (!room || room.phase !== "playing" || msg.pid !== room.hostPid) return { ok: false };

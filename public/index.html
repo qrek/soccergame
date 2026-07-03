@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#04121f" />
   <title>Football Draft — Ultimate National Teams</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
-  <link rel="stylesheet" href="css/styles.css?v=9" />
+  <link rel="stylesheet" href="css/styles.css?v=10" />
 </head>
 <body>
   <div id="app">
@@ -79,6 +79,10 @@
 
         <button class="btn btn-primary" id="btn-start" disabled>Démarrer le draft</button>
         <p class="hint" id="lobby-hint">En attente de joueurs…</p>
+        <div class="join-row">
+          <button class="btn btn-ghost btn-wide btn-danger" id="btn-reset-lobby">🔄 Réinitialiser</button>
+          <button class="btn btn-ghost btn-wide" id="btn-leave">🚪 Quitter la session</button>
+        </div>
       </div>
     </section>
 
@@ -155,10 +159,10 @@
   <!-- Feuille de match (temps forts + visuel façon FM) -->
   <div id="match-modal" class="modal"><div class="match-sheet" id="match-sheet"></div></div>
 
-  <script src="js/qrcode.js?v=9"></script>
-  <script src="js/model.js?v=9"></script>
-  <script src="js/engine.js?v=9"></script>
-  <script src="data/players.js?v=9"></script>
-  <script src="js/app.js?v=9"></script>
+  <script src="js/qrcode.js?v=10"></script>
+  <script src="js/model.js?v=10"></script>
+  <script src="js/engine.js?v=10"></script>
+  <script src="data/players.js?v=10"></script>
+  <script src="js/app.js?v=10"></script>
 </body>
 </html>

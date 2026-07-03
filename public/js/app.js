@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v9 — bouton reset";
+  const APP_VERSION = "v10 — reset au salon";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -273,7 +273,18 @@
 
   // Réinitialisation d'urgence (confirmée) — accessible à tous les joueurs.
   const confirmReset = () => { if (confirm("Réinitialiser la partie pour tout le monde et revenir au salon ?")) api("resetGame"); };
-  ["btn-reset-draft", "btn-reset-playing", "btn-reset-results"].forEach((id) => $(id).addEventListener("click", confirmReset));
+  ["btn-reset-lobby", "btn-reset-draft", "btn-reset-playing", "btn-reset-results"].forEach((id) => $(id).addEventListener("click", confirmReset));
+
+  // Quitter la session : retour à l'accueil (et libère sa place au salon).
+  $("btn-leave").addEventListener("click", () => {
+    if (!confirm("Quitter cette session ?")) return;
+    api("leaveRoom");
+    if (state.es) state.es.close();
+    try { localStorage.removeItem("fd_session"); } catch (_) {}
+    if (local.active) { local.active = false; local.players = []; local.phase = "lobby"; local.draft = null; local.tournament = null; local.reveal = null; }
+    state.code = null; state.pid = null; state.snap = null;
+    show("screen-home");
+  });
 
   // ---------- Onglets ----------
   document.querySelector(".tabs").addEventListener("click", (e) => {

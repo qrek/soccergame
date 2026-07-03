@@ -1,0 +1,15 @@
+{
+  "name": "football-draft",
+  "version": "1.0.0",
+  "description": "Jeu web mobile : draft d'équipes nationales de football (années 50 à aujourd'hui) et tournoi, en multijoueur par code/QR code.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "license": "MIT"
+}

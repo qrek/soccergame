@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#04121f" />
+  <title>Football Draft — Ultimate National Teams</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ================= ACCUEIL ================= -->
+    <section class="screen active" id="screen-home">
+      <div class="home-hero">
+        <div class="logo">⚽ FOOTBALL <span>DRAFT</span></div>
+        <p class="tagline">Draftez les légendes des sélections nationales<br/>des années 50 à aujourd'hui.</p>
+      </div>
+      <div class="home-actions">
+        <input id="home-name" class="field" maxlength="16" placeholder="Ton pseudo" autocomplete="off" />
+        <button class="btn btn-primary" id="btn-create">Créer une session</button>
+        <div class="or">ou rejoindre</div>
+        <div class="join-row">
+          <input id="home-code" class="field code-input" maxlength="4" placeholder="CODE" autocomplete="off" />
+          <button class="btn btn-ghost" id="btn-join">Rejoindre</button>
+        </div>
+        <p class="hint" id="home-error"></p>
+      </div>
+      <footer class="home-foot">218 légendes · 24 nations · multijoueur temps réel</footer>
+    </section>
+
+    <!-- ================= LOBBY ================= -->
+    <section class="screen" id="screen-lobby">
+      <header class="topbar">
+        <span class="brand">⚽ DRAFT</span>
+        <span class="room-pill">Session <b id="lobby-code">----</b></span>
+      </header>
+      <div class="lobby-body">
+        <div class="qr-card">
+          <div id="qr-holder"></div>
+          <div class="qr-code">Code : <b id="lobby-code-big">----</b></div>
+          <div class="qr-note">Scanne le QR ou saisis le code pour rejoindre</div>
+        </div>
+
+        <div class="config" id="host-config">
+          <div class="config-title">Taille des équipes</div>
+          <div class="size-picker" id="size-picker">
+            <button data-size="5">5</button>
+            <button data-size="7">7</button>
+            <button data-size="9">9</button>
+            <button data-size="11" class="on">11</button>
+          </div>
+        </div>
+
+        <div class="players-title">Joueurs connectés (<span id="lobby-count">0</span>/8)</div>
+        <ul class="player-list" id="lobby-players"></ul>
+
+        <button class="btn btn-primary" id="btn-start" disabled>Démarrer le draft</button>
+        <p class="hint" id="lobby-hint">En attente de joueurs…</p>
+      </div>
+    </section>
+
+    <!-- ================= DRAFT ================= -->
+    <section class="screen" id="screen-draft">
+      <header class="topbar">
+        <span class="brand">DRAFT</span>
+        <span class="draft-progress"><b id="draft-pick">0</b>/<span id="draft-total">0</span></span>
+        <span class="timer" id="draft-timer">45</span>
+      </header>
+
+      <div class="turn-banner" id="turn-banner">
+        <span id="turn-text">…</span>
+      </div>
+
+      <div class="draft-team" id="draft-team">
+        <div class="team-flag" id="team-flag">🏳️</div>
+        <div class="team-name" id="team-name">—</div>
+        <div class="team-sub">Équipe tirée au sort</div>
+      </div>
+
+      <div class="need-bar" id="need-bar"></div>
+
+      <div class="cards-grid" id="cards-grid"></div>
+
+      <div class="my-squad-mini" id="my-squad-mini"></div>
+    </section>
+
+    <!-- ================= RÉSULTATS ================= -->
+    <section class="screen" id="screen-results">
+      <header class="topbar">
+        <span class="brand">⚽ DRAFT</span>
+        <span class="room-pill">Résultats</span>
+      </header>
+      <div class="results-body">
+        <div class="champion-card" id="champion-card"></div>
+
+        <div class="tabs">
+          <button class="tab on" data-tab="bracket">Phases finales</button>
+          <button class="tab" data-tab="table">Classement</button>
+          <button class="tab" data-tab="squads">Équipes</button>
+        </div>
+
+        <div class="tab-panel on" id="tab-bracket"></div>
+        <div class="tab-panel" id="tab-table"></div>
+        <div class="tab-panel" id="tab-squads"></div>
+
+        <button class="btn btn-primary" id="btn-again" style="display:none">Rejouer</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="js/qrcode.js"></script>
+  <script src="data/players.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

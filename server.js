@@ -179,7 +179,7 @@ function prepareTurn(room) {
   const drafted = draftedIds(room);
   const need = neededPositions(room, drafter);
   // Réserve : garder de quoi payer les postes restants (~2 M€ chacun).
-  const budget = { left: MODEL.BUDGET - drafter.spent, reserve: 3 * (SQUAD_SIZE - drafter.squad.length - 1) };
+  const budget = { left: MODEL.BUDGET - drafter.spent, needCounts: need };
   d.currentTeam = engine.drawTeamForTurn(PLAYERS, drafted, new Set(Object.keys(need)), budget);
   d.deadline = Date.now() + TURN_SECONDS * 1000;
   scheduleAutoPick(room);

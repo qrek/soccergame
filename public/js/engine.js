@@ -170,17 +170,34 @@
 
   // Tire une équipe nationale au sort pour le tour de draft courant.
   // Retourne TOUS les joueurs du pays : les déjà draftés marqués `taken`,
-  // les inabordables marqués `expensive`. budget = { left, reserve } :
-  // un joueur est abordable si son prix laisse de quoi finir l'effectif.
+  // les inabordables marqués `expensive`.
+  // budget = { left, needCounts } : un joueur est abordable si, après achat,
+  // il reste de quoi payer les joueurs les MOINS CHERS disponibles à chaque
+  // poste encore manquant (réserve exacte, +1 M€ de marge par slot).
   function drawTeamForTurn(allPlayers, draftedIds, neededPos, budget) {
-    const maxPrice = budget ? budget.left - budget.reserve : Infinity;
     const byCountry = new Map();
     for (const p of allPlayers) {
       if (!byCountry.has(p.c)) byCountry.set(p.c, []);
       byCountry.get(p.c).push(p);
     }
     const free = (p) => !draftedIds.has(p.id);
-    const afford = (p) => MODEL.marketValue(p) <= maxPrice;
+
+    let afford = () => true;
+    if (budget) {
+      const cheap = { GK: [], DEF: [], MID: [], FWD: [] };
+      for (const p of allPlayers) if (free(p)) cheap[p.pos].push(MODEL.marketValue(p));
+      for (const k in cheap) cheap[k].sort((a, b) => a - b);
+      const minCostAfter = (pos) => {
+        let total = 0;
+        for (const k of ["GK", "DEF", "MID", "FWD"]) {
+          let n = budget.needCounts[k] || 0;
+          if (k === pos && n > 0) n--; // le slot que ce pick remplit
+          for (let i = 0; i < n; i++) total += (cheap[k][i] != null ? cheap[k][i] : 2) + 1;
+        }
+        return total;
+      };
+      afford = (p) => MODEL.marketValue(p) <= budget.left - minCostAfter(p.pos);
+    }
     const needed = (p) => neededPos.has(p.pos);
     const entries = [...byCountry.entries()];
 
@@ -204,7 +221,7 @@
       .map((p) => {
         const taken = draftedIds.has(p.id);
         const price = MODEL.marketValue(p);
-        const affordable = !stage.bud || price <= maxPrice;
+        const affordable = !stage.bud || afford(p);
         return Object.assign({}, p, {
           taken, price,
           expensive: !taken && stage.bud && !afford(p),
@@ -269,8 +286,22 @@
     const N = teams.length;
     const K = N >= 8 ? 8 : N >= 4 ? 4 : N >= 2 ? 2 : 0;
     const knockout = buildKnockout(standings, teamById, K);
+
+    // Classement des buteurs (championnat + phases finales).
+    const goals = new Map();
+    const addEvents = (evs) => (evs || []).forEach((e) => {
+      if (e.type !== "goal") return;
+      const k = e.scorer + "|" + e.code;
+      const g = goals.get(k) || { n: e.scorer, code: e.code, team: e.teamName, goals: 0 };
+      g.goals++; g.team = e.teamName;
+      goals.set(k, g);
+    });
+    matches.forEach((m) => addEvents(m.events));
+    if (knockout) knockout.rounds.forEach((r) => r.forEach((m) => addEvents(m.events)));
+    const scorers = [...goals.values()].sort((a, b) => b.goals - a.goals).slice(0, 12);
+
     return {
-      standings, matches, knockout,
+      standings, matches, knockout, scorers,
       champion: knockout ? knockout.champion
         : (standings[0] ? { id: standings[0].id, name: teamById[standings[0].id].name } : null),
     };

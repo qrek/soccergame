@@ -47,7 +47,7 @@
     const statsHtml = stats.map((s) => `<span class="cell"><b>${s.value}</b><i>${s.label}</i></span>`).join("");
     const price = pl.price != null ? pl.price : MODEL.marketValue(pl);
     const stateClass = pl.taken ? "taken" : pl.expensive ? "expensive" : opts.disabled ? "disabled" : "";
-    return `<div class="fut ${tierClass(pl.r)} ${stateClass}" data-id="${pl.id}">
+    return `<div class="fut ${tierClass(pl.r)} ${stateClass} ${opts.chemLink ? "linked" : ""}" data-id="${pl.id}">
       ${pl.taken ? '<span class="taken-badge">PRIS</span>' : ""}
       ${pl.expensive ? '<span class="taken-badge expensive-badge">TROP CHER</span>' : ""}
       <div class="fut-inner">
@@ -56,7 +56,7 @@
           <div class="fut-badges"><span class="flag">${flag(pl.code)}</span><span class="price">${fmtM(price)}</span></div>
         </div>
         <div class="fut-name">${esc(pl.n)}</div>
-        <div class="fut-sub">${esc(pl.c)} · ${esc(pl.d)}</div>
+        <div class="fut-sub">${esc(pl.c)} · ${esc(pl.d)}${opts.chemLink ? ' · <span class="linktag">🔗 lien</span>' : ""}</div>
         <div class="fut-stats">${statsHtml}</div>
       </div></div>`;
   }
@@ -138,7 +138,7 @@
     const d = local.draft;
     d.currentPid = d.order[d.pickNum];
     const cur = local.players.find((p) => p.pid === d.currentPid);
-    const budget = { left: MODEL.BUDGET - cur.spent, reserve: 3 * (11 - cur.squad.length - 1) };
+    const budget = { left: MODEL.BUDGET - cur.spent, needCounts: localNeeded(cur) };
     d.currentTeam = ENGINE.drawTeamForTurn(LPLAYERS, localDrafted(), new Set(Object.keys(localNeeded(cur))), budget);
   }
 
@@ -408,13 +408,19 @@
 
     const budgetChip = d.budget != null
       ? `<span class="need-chip budget-chip">💰 <b>${fmtM(Math.round(d.budgetLeft * 10) / 10)}</b> / ${fmtM(d.budget)}</span>` : "";
-    $("need-bar").innerHTML = budgetChip
+    // Alchimie en direct : la sienne + les pays de son effectif pour repérer les liens.
+    const m0 = me();
+    const chemChip = m0
+      ? `<span class="need-chip chem-chip">🔗 Alchimie <b>${MODEL.chemistry(m0.squad, m0.formationKey).teamChem}</b></span>` : "";
+    $("need-bar").innerHTML = budgetChip + chemChip
       + (Object.entries(d.needed).map(([pos, n]) => `<span class="need-chip">${pos} <b>×${n}</b></span>`).join("")
       || '<span class="need-chip">Effectif complet</span>');
 
+    const myCountries = new Set((m0 ? m0.squad : []).map((p) => p.c));
     const grid = $("cards-grid");
     grid.classList.toggle("locked", !myTurn);
-    grid.innerHTML = d.team.options.map((o) => futCard(o, { disabled: !o.eligible })).join("");
+    grid.innerHTML = d.team.options.map((o) =>
+      futCard(o, { disabled: !o.eligible, chemLink: o.eligible && myCountries.has(o.c) })).join("");
 
     const m = me();
     $("my-squad-mini").innerHTML = (m ? m.squad : []).map((p) =>
@@ -471,12 +477,24 @@
       </div>
       <div class="pitch">
         <svg class="lines" viewBox="0 0 100 150" preserveAspectRatio="none">
-          <g fill="none" stroke="rgba(255,255,255,.28)" stroke-width="0.6">
+          <g fill="none" stroke="rgba(255,255,255,.38)" stroke-width="0.55">
             <rect x="2" y="2" width="96" height="146"/>
             <line x1="2" y1="75" x2="98" y2="75"/>
-            <circle cx="50" cy="75" r="12"/>
-            <rect x="28" y="2" width="44" height="20"/><rect x="40" y="2" width="20" height="8"/>
-            <rect x="28" y="128" width="44" height="20"/><rect x="40" y="140" width="20" height="8"/>
+            <circle cx="50" cy="75" r="12.5"/>
+            <!-- Surfaces + arcs de réparation -->
+            <rect x="22" y="2" width="56" height="22"/><rect x="35" y="2" width="30" height="9"/>
+            <path d="M 39 24 A 12 12 0 0 0 61 24"/>
+            <rect x="22" y="126" width="56" height="22"/><rect x="35" y="139" width="30" height="9"/>
+            <path d="M 39 126 A 12 12 0 0 1 61 126"/>
+            <!-- Buts -->
+            <rect x="42.5" y="0.4" width="15" height="1.6"/>
+            <rect x="42.5" y="148" width="15" height="1.6"/>
+            <!-- Corners -->
+            <path d="M 2 6 A 4 4 0 0 0 6 2"/><path d="M 94 2 A 4 4 0 0 0 98 6"/>
+            <path d="M 2 144 A 4 4 0 0 1 6 148"/><path d="M 94 148 A 4 4 0 0 1 98 144"/>
+          </g>
+          <g fill="rgba(255,255,255,.5)">
+            <circle cx="50" cy="75" r="0.9"/><circle cx="50" cy="17" r="0.9"/><circle cx="50" cy="133" r="0.9"/>
           </g>
         </svg>
         <svg class="chem" viewBox="0 0 100 150" preserveAspectRatio="none">${linksSvg}</svg>
@@ -529,6 +547,16 @@
         <td class="rk">${i + 1}</td><td class="tname">${esc(r.name)}${r.id === state.pid ? '<span class="you-tag">TOI</span>' : ""}</td>
         <td>${r.played}</td><td>${r.w}</td><td>${r.d}</td><td>${r.l}</td>
         <td>${r.gd > 0 ? "+" : ""}${r.gd}</td><td class="pts">${r.pts}</td></tr>`).join("")}</table>
+      ${(t.scorers && t.scorers.length) ? `
+      <div class="round-title">🥇 Meilleurs buteurs</div>
+      <table class="ltable scorers">
+        <tr><th>#</th><th style="text-align:left">Joueur</th><th style="text-align:left">Équipe</th><th>Buts</th></tr>
+        ${t.scorers.map((sc, i) => `<tr class="${i === 0 ? "qualif" : ""}">
+          <td class="rk">${i + 1}</td>
+          <td class="tname">${flag(sc.code)} ${esc(sc.n)}</td>
+          <td class="tname" style="color:var(--muted)">${esc(sc.team)}</td>
+          <td class="pts">${sc.goals}</td></tr>`).join("")}
+      </table>` : ""}
       <div class="round-title">Matchs de poule</div>
       ${(t.matches || []).map((mm, idx) => { const mk = `l${idx}`; state.matchMap.set(mk, mm);
         return `<div class="match clickable" data-mk="${mk}">
@@ -589,11 +617,18 @@
       ${mm.pens ? `<div class="ms-pens">Tirs au but : ${mm.pens.pa} - ${mm.pens.pb}</div>` : ""}
       <div class="fm-legend">${legend}</div>
       <div class="fm-pitch"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
-        <g fill="none" stroke="rgba(255,255,255,.28)" stroke-width="0.5">
+        <g fill="none" stroke="rgba(255,255,255,.38)" stroke-width="0.45">
           <rect x="1.5" y="1.5" width="97" height="61"/>
-          <line x1="50" y1="1.5" x2="50" y2="62.5"/><circle cx="50" cy="32" r="9"/>
-          <rect x="1.5" y="18" width="12" height="28"/><rect x="86.5" y="18" width="12" height="28"/>
-        </g>${dots}
+          <line x1="50" y1="1.5" x2="50" y2="62.5"/><circle cx="50" cy="32" r="9.5"/>
+          <rect x="1.5" y="16" width="13" height="32"/><rect x="1.5" y="25" width="5" height="14"/>
+          <path d="M 14.5 26 A 8 8 0 0 1 14.5 38"/>
+          <rect x="85.5" y="16" width="13" height="32"/><rect x="93.5" y="25" width="5" height="14"/>
+          <path d="M 85.5 38 A 8 8 0 0 1 85.5 26"/>
+          <path d="M 1.5 5 A 3.5 3.5 0 0 0 5 1.5"/><path d="M 95 1.5 A 3.5 3.5 0 0 0 98.5 5"/>
+          <path d="M 1.5 59 A 3.5 3.5 0 0 1 5 62.5"/><path d="M 95 62.5 A 3.5 3.5 0 0 1 98.5 59"/>
+        </g>
+        <g fill="rgba(255,255,255,.5)"><circle cx="50" cy="32" r="0.8"/><circle cx="10" cy="32" r="0.8"/><circle cx="90" cy="32" r="0.8"/></g>
+        ${dots}
       </svg></div>
       <div class="fm-events">${lines}</div>
       <p class="ms-note">Les frappes citent la note de tir du joueur et la défense adverse : c'est ainsi que l'algorithme départage les équipes.</p>`;
@@ -636,6 +671,8 @@
       fetch("_mock/" + mock + ".json").then((r) => r.json()).then((d) => {
         state.code = d.snap.code; state.pid = d.viewPid; state.snap = d.snap; render();
         if (params.get("open") && state.matchMap && state.matchMap.size) matchModal(state.matchMap.values().next().value);
+        const tb = params.get("tab");
+        if (tb) { const el = document.querySelector(`.tab[data-tab="${tb}"]`); if (el) el.click(); }
       });
       return;
     }

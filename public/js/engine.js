@@ -588,11 +588,33 @@
       kicks: so.kicks.map((k) => ({ side: k.side, name: k.name, scored: k.scored, dir: k.dir, dive: k.dive })) };
   }
 
+  // Gels de l'horloge d'un match : célébrations de but + fenêtres de penalty.
+  // penHold = 0 (mode local) : les penalties ne gèlent pas, seuls les buts.
+  // La liste est IDENTIQUE côté serveur et client (même timeline pour tous).
+  function freezesOf(m, goalHold, penHold) {
+    return (m.events || [])
+      .filter((e) => (e.pen && penHold > 0) || e.type === "goal")
+      .slice().sort((x, y) => x.m - y.m)
+      .map((e) => ({ m: e.m, len: e.pen && penHold > 0 ? penHold : goalHold, ev: e }));
+  }
+
   // Vue publique d'un match (sans les champs internes _ta/_tb).
+  // Les penalties en attente de résolution interactive sont masqués :
+  // l'issue pré-simulée ne doit pas fuiter avant le choix des managers.
   function publicMatch(m) {
+    const events = (m.events || []).map((ev) => ev.pending
+      ? { m: ev.m, side: ev.side, type: "pen", pen: true, pending: true, scorer: ev.scorer,
+          code: ev.code, sho: ev.sho, gkName: ev.gkName, teamName: ev.teamName,
+          text: `⚠️ PENALTY pour ${ev.teamName} ! ${ev.scorer} va le tirer...` }
+      : ev);
     return { a: m.a, b: m.b, an: m.an, bn: m.bn, ga: m.ga, gb: m.gb, round: m.round,
-      events: m.events, pens: m.pens || null, winner: m.winner, ko: m.ko, dur: m.dur || 90,
+      events, pens: m.pens || null, winner: m.winner, ko: m.ko, dur: m.dur || 90,
       injured: m.injured || null,
+      livePen: m.livePen ? { m: m.livePen.m, side: m.livePen.side, scorer: m.livePen.scorer,
+        gkName: m.livePen.gkName, phase: m.livePen.phase, deadline: m.livePen.deadline,
+        dir: m.livePen.phase === "reveal" ? m.livePen.dir : null,
+        dive: m.livePen.phase === "reveal" ? m.livePen.dive : null,
+        out: m.livePen.phase === "reveal" ? m.livePen.out : null } : null,
       stanceA: m.stanceA, stanceB: m.stanceB, instr: m.instr || {}, shootout: m.shootout ? publicShootout(m.shootout) : null };
   }
 
@@ -628,5 +650,5 @@
 
   return { teamStrength, simulateMatch, simulateKnockout, roundRobin, computeStandings, seedFor, drawTeamForTurn, runTournament, buildRounds,
     createTournament, playNextRound, settleRound, applyInstruction, publicMatch, finalizeTournament, formMalus,
-    resolvePenalty, publicShootout, shoOf, makeRng };
+    resolvePenalty, publicShootout, shoOf, makeRng, freezesOf, extraTime, retagPenalties, commentary };
 });

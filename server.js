@@ -123,6 +123,32 @@ function draftedIds(room) {
 // ---------------------------------------------------------------------------
 // Diffusion (SSE)
 // ---------------------------------------------------------------------------
+// Tableau du tournoi pendant la diffusion : tours KO joués (scores figés),
+// tour en cours SANS score (pas de spoiler), paires du prochain tour si connues.
+function buildBracket(room, cur) {
+  const t = room.tstate;
+  if (!t) return null;
+  const rounds = t.koRounds.map((r) => r.map((m) => cur && cur.matches.indexOf(m) >= 0
+    ? { a: m.a, b: m.b, live: true }
+    : { a: m.a, b: m.b, ga: m.ga, gb: m.gb, winner: m.winner, pens: m.pens || null }));
+  // koPairs pointe encore sur le tour en cours tant qu'il n'est pas soldé :
+  // on ne l'expose comme "à venir" que s'il s'agit bien d'un tour futur.
+  let next = null;
+  if (t.koPairs && t.koPairs.length) {
+    const last = t.koRounds[t.koRounds.length - 1];
+    const same = last && last.length === t.koPairs.length && last.every((m, i) => m.a === t.koPairs[i][0] && m.b === t.koPairs[i][1]);
+    if (!same) next = t.koPairs.map(([a, b]) => [a, b]);
+  }
+  return {
+    koSize: t.koSize,
+    leagueRounds: t.leagueRounds.length,
+    leaguePlayed: Math.min(t.stageNum, t.leagueRounds.length),
+    koStage: t.koStage,
+    rounds, next,
+    champion: t.champion != null ? t.champion : null,
+  };
+}
+
 function snapshot(room) {
   const players = room.players.map((p) => {
     const t0 = room.tstate;
@@ -205,10 +231,13 @@ function snapshot(room) {
       startedAt: room.reveal.startedAt,
       clockMs: MATCH_MS,
       goalHoldMs: GOAL_HOLD_MS,
+      penHoldMs: PEN_LIVE_MS,
       // matchs de championnat des journées PRÉCÉDENTES (classement live)
       playedMatches: room.tstate.playedLeague
         .filter((m) => cur.matches.indexOf(m) < 0)
         .map((m) => ({ a: m.a, b: m.b, ga: m.ga, gb: m.gb })),
+      // tableau du tournoi : poule + arbre KO (le tour en cours est masqué)
+      bracket: buildBracket(room, cur),
     };
   }
 
@@ -397,6 +426,11 @@ function finishDraft(room) {
 
 const PEN_INPUT_MS = parseInt(process.env.PEN_INPUT_MS, 10) || 12000; // temps pour choisir tir/plongeon
 const PEN_REVEAL_MS = parseInt(process.env.PEN_REVEAL_MS, 10) || 2600;  // suspense entre deux tirs
+// Penalty en cours de match : fenêtre de choix + révélation (l'horloge du
+// match reste figée sur la faute pendant toute la fenêtre).
+const PEN_LIVE_INPUT_MS = parseInt(process.env.PEN_LIVE_INPUT_MS, 10) || 9000;
+const PEN_LIVE_REVEAL_MS = parseInt(process.env.PEN_LIVE_REVEAL_MS, 10) || 3500;
+const PEN_LIVE_MS = PEN_LIVE_INPUT_MS + PEN_LIVE_REVEAL_MS;
 
 function startRound(room) {
   clearTimeout(room.revealTimer);
@@ -405,18 +439,130 @@ function startRound(room) {
   room.reveal.current = round;
   room.reveal.idx++;
   room.reveal.startedAt = Date.now();
-  const maxGoals = Math.max(0, ...round.matches.map((m) => (m.events || []).filter((e) => e.type === "goal").length));
-  const maxDur = Math.max(90, ...round.matches.map((m) => m.dur || 90)); // prolongations
-  const playMs = Math.round((MATCH_MS * maxDur) / 90) + maxGoals * GOAL_HOLD_MS;
-  room.revealTimer = setTimeout(() => {
-    const tied = round.type === "ko" ? round.matches.filter((m) => m.ga === m.gb && m.winner == null) : [];
-    if (tied.length) {
-      tied.forEach((m) => buildShootout(room, m)); // séance interactive
-    } else {
-      room.revealTimer = setTimeout(() => advanceAfterRound(room, round), PAUSE_MS);
-    }
-  }, playMs);
+  // Penalties en cours de match : chaque coup de sifflet devient une fenêtre
+  // interactive (le résultat pré-simulé sera re-décidé par les managers).
+  round.matches.forEach((m) => {
+    (m.events || []).forEach((ev) => { if (ev.pen) ev.pending = true; });
+    schedulePens(room, m);
+  });
+  scheduleRoundEnd(room, round);
   broadcast(room);
+}
+
+// Durée totale du direct d'un match : temps de jeu + gels (buts, penalties).
+function matchPlayMs(m) {
+  const freezes = engine.freezesOf(m, GOAL_HOLD_MS, PEN_LIVE_MS);
+  return Math.round((MATCH_MS * (m.dur || 90)) / 90) + freezes.reduce((s, f) => s + f.len, 0);
+}
+
+// (Re)programme la fin de journée : les fenêtres de penalty et les
+// prolongations peuvent changer en cours de route.
+function scheduleRoundEnd(room, round) {
+  clearTimeout(room.revealTimer);
+  const playMs = Math.max(0, ...round.matches.map(matchPlayMs));
+  const delay = Math.max(0, room.reveal.startedAt + playMs - Date.now());
+  room.revealTimer = setTimeout(() => endOfRound(room, round), delay);
+}
+
+function endOfRound(room, round) {
+  const tied = round.type === "ko" ? round.matches.filter((m) => m.ga === m.gb && m.winner == null) : [];
+  if (tied.length) {
+    tied.forEach((m) => buildShootout(room, m)); // séance interactive
+  } else {
+    room.revealTimer = setTimeout(() => advanceAfterRound(room, round), PAUSE_MS);
+  }
+}
+
+// ---- Penalties en direct : fenêtre d'input pendant le match ----
+// Instant (ms depuis le coup d'envoi) où démarre la fenêtre d'un penalty.
+function penStartMs(m, ev) {
+  let holds = 0;
+  for (const f of engine.freezesOf(m, GOAL_HOLD_MS, PEN_LIVE_MS)) {
+    const tg = (f.m / 90) * MATCH_MS + holds;
+    if (f.ev === ev) return tg;
+    holds += f.len;
+  }
+  return null;
+}
+
+function clearPenTimers(m) {
+  (m._lpTimers || []).forEach(clearTimeout);
+  m._lpTimers = [];
+}
+
+function schedulePens(room, m) {
+  clearPenTimers(m);
+  for (const ev of m.events || []) {
+    if (!ev.pen || !ev.pending) continue;
+    const tW = penStartMs(m, ev);
+    if (tW == null) continue;
+    const delay = Math.max(0, room.reveal.startedAt + tW - Date.now());
+    m._lpTimers.push(setTimeout(() => armLivePen(room, m, ev, tW), delay));
+  }
+}
+
+function armLivePen(room, m, ev, tW) {
+  m.livePen = { m: ev.m, side: ev.side, scorer: ev.scorer, gkName: ev.gkName, ev,
+    phase: "await", pending: { shot: null, dive: null },
+    deadline: room.reveal.startedAt + tW + PEN_LIVE_INPUT_MS, endAt: room.reveal.startedAt + tW + PEN_LIVE_MS };
+  if (!m._lprng) m._lprng = engine.makeRng(engine.seedFor(m.a, m.b, m.salt) ^ 0x11f2a7);
+  m._lpTimers.push(setTimeout(() => resolveLivePen(room, m), Math.max(0, m.livePen.deadline - Date.now())));
+  broadcast(room);
+}
+
+function resolveLivePen(room, m) {
+  const lp = m.livePen;
+  if (!lp || lp.phase !== "await") return;
+  const ev = lp.ev;
+  const dirs = ["L", "C", "R"];
+  const shot = lp.pending.shot || dirs[Math.floor(m._lprng() * 3)];
+  const dive = lp.pending.dive || dirs[Math.floor(m._lprng() * 3)];
+  const defTeam = ev.side === "a" ? m._tb : m._ta;
+  const gk = defTeam.players.find((p) => p.pos === "GK") || defTeam.players[0];
+  const scored = engine.resolvePenalty(shot, dive, ev.sho, gk.r, m._lprng());
+  // Le choix des managers REMPLACE l'issue pré-simulée.
+  ev.type = scored ? "goal" : (shot === dive ? "saved" : "off");
+  ev.text = engine.commentary(ev);
+  delete ev.pending;
+  ev.lpDone = true;
+  lp.phase = "reveal"; lp.dir = shot; lp.dive = dive; lp.out = ev.type;
+  // Score recalculé depuis les évènements (les penalties en attente ne comptent pas).
+  const recount = () => {
+    m.ga = (m.events || []).filter((e) => e.type === "goal" && e.side === "a").length;
+    m.gb = (m.events || []).filter((e) => e.type === "goal" && e.side === "b").length;
+  };
+  recount();
+  // En KO, la prolongation dépend du score à la 90e : on la recalcule si le
+  // penalty a eu lieu dans le temps réglementaire.
+  if (m.ko && ev.m <= 90) {
+    m.events = (m.events || []).filter((e) => e.m <= 90);
+    m.dur = 90;
+    recount();
+    if (m.ga === m.gb) {
+      engine.extraTime(m, engine.seedFor(m.a, m.b, m.salt));
+      engine.retagPenalties(m);
+      (m.events || []).forEach((e) => { if (e.pen && e.m > 90 && !e.lpDone) e.pending = true; });
+    }
+  }
+  // Fin de la fenêtre : on efface le panneau puis on reprogramme la suite
+  // (nouveaux penalties de prolongation éventuels, fin de journée décalée).
+  m._lpTimers.push(setTimeout(() => {
+    m.livePen = null;
+    schedulePens(room, m);
+    if (room.reveal && room.reveal.current) scheduleRoundEnd(room, room.reveal.current);
+    broadcast(room);
+  }, Math.max(0, lp.endAt - Date.now())));
+  broadcast(room);
+}
+
+// Purge les fenêtres de penalty (skip, reset, fin de partie).
+function clearLivePens(room) {
+  if (!room.reveal || !room.reveal.current) return;
+  room.reveal.current.matches.forEach((m) => {
+    clearPenTimers(m);
+    m.livePen = null;
+    (m.events || []).forEach((ev) => { delete ev.pending; });
+  });
 }
 
 function advanceAfterRound(room, round) {
@@ -498,6 +644,7 @@ function resolveKick(room, m) {
 
 function finishReveal(room) {
   clearTimeout(room.revealTimer);
+  clearLivePens(room);
   if (room.reveal && room.reveal.current) room.reveal.current.matches.forEach((m) => { if (m.shootout) clearTimeout(m.shootout._timer); });
   // au cas où on saute la diffusion : terminer le tournoi d'un coup
   if (room.tstate && !room.tstate.done) {
@@ -517,6 +664,7 @@ function resetRoom(room) {
   clearTimeout(room.revealTimer);
   if (room.auction) clearTimeout(room.auction.timer);
   room.auction = null;
+  clearLivePens(room);
   if (room.reveal && room.reveal.current) room.reveal.current.matches.forEach((m) => { if (m.shootout) clearTimeout(m.shootout._timer); });
   room.phase = "lobby";
   room.draft = null;
@@ -532,6 +680,17 @@ function penInput(msg, kind) {
   const room = rooms.get(msg.code);
   if (!room || room.phase !== "playing" || !room.reveal || !room.reveal.current) return { ok: false };
   if (["L", "C", "R"].indexOf(msg.dir) < 0) return { ok: false };
+  // 1) penalty en cours de match (fenêtre live)
+  const mp = room.reveal.current.matches.find((x) => x.livePen && x.livePen.phase === "await"
+    && (kind === "shot"
+      ? (x.livePen.side === "a" ? x.a : x.b) === msg.pid
+      : (x.livePen.side === "a" ? x.b : x.a) === msg.pid));
+  if (mp) {
+    mp.livePen.pending[kind] = msg.dir;
+    if (mp.livePen.pending.shot && mp.livePen.pending.dive) resolveLivePen(room, mp);
+    return { ok: true };
+  }
+  // 2) séance de tirs au but
   const m = room.reveal.current.matches.find((x) => x.shootout && !x.shootout.done && x.shootout.phase === "await"
     && (kind === "shot"
       ? (x.shootout.kicker.side === "a" ? x.a : x.b) === msg.pid
@@ -704,20 +863,24 @@ const ACTIONS = {
     if (!m) return { ok: false, error: "Pas de match en cours." };
     const uses = (m.instr && m.instr[msg.pid]) || 0;
     if (uses >= 3) return { ok: false, error: "Plus d'instruction disponible (3 max)." };
-    // minute courante (horloge + pauses célébration)
+    if (m.livePen) return { ok: false, error: "Attends la fin du penalty !" };
+    // minute courante (horloge + gels : célébrations et fenêtres de penalty)
     const elapsed = Date.now() - room.reveal.startedAt;
-    const goals = (m.events || []).filter((e) => e.type === "goal").sort((x, y) => x.m - y.m);
     let holds = 0, minute = null;
-    for (const g of goals) {
-      const tg = (g.m / 90) * MATCH_MS + holds;
+    for (const f of engine.freezesOf(m, GOAL_HOLD_MS, PEN_LIVE_MS)) {
+      const tg = (f.m / 90) * MATCH_MS + holds;
       if (elapsed < tg) break;
-      if (elapsed < tg + GOAL_HOLD_MS) { minute = g.m; break; }
-      holds += GOAL_HOLD_MS;
+      if (elapsed < tg + f.len) { minute = f.m; break; }
+      holds += f.len;
     }
     if (minute === null) minute = Math.min(90, Math.floor(((elapsed - holds) / MATCH_MS) * 90));
     if (minute >= 85) return { ok: false, error: "Trop tard pour changer de tactique." };
     m.instr[msg.pid] = uses + 1;
     engine.applyInstruction(m, m.a === msg.pid ? "a" : "b", stance, minute);
+    // la re-simulation a pu créer/déplacer des penalties : on remet à plat
+    (m.events || []).forEach((ev) => { if (ev.pen && ev.m > minute && !ev.lpDone) ev.pending = true; });
+    schedulePens(room, m);
+    scheduleRoundEnd(room, room.reveal.current);
     broadcast(room);
     return { ok: true, stance };
   },

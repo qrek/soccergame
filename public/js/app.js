@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v28 — enchères, TAB interactifs, prolongations";
+  const APP_VERSION = "v29 — penalties interactifs, blocs FM, cartons";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -403,8 +403,11 @@
     const b = e.target.closest("button[data-dir]");
     if (!b) return;
     const role = b.parentElement.dataset.role;
-    const so = state.snap && state.snap.playing && (state.snap.playing.matches.find((m) => m.shootout && !m.shootout.done) || {}).shootout;
-    if (so) state.penPicked = so.turn + ":" + state.pid;
+    const pms = (state.snap && state.snap.playing && state.snap.playing.matches) || [];
+    const mlp = pms.find((m) => m.livePen && m.livePen.phase === "await");
+    const so = (pms.find((m) => m.shootout && !m.shootout.done) || {}).shootout;
+    if (mlp) state.penPicked = "lp:" + mlp.a + ":" + mlp.b + ":" + mlp.livePen.m + ":" + state.pid;
+    else if (so) state.penPicked = so.turn + ":" + state.pid;
     const r = await api(role === "kick" ? "penKick" : "penDive", { dir: b.dataset.dir });
     if (r && r.ok) { SND.ding(); vibe(60); }
   });
@@ -456,7 +459,7 @@
     const elapsed = Date.now() - p.startedAt;
     const hold = p.goalHoldMs || 3500;
     const current = p.type === "league" ? p.matches.map((m) => {
-      const mc = matchClock(elapsed, goalsOf(m), p.clockMs, hold, m.dur);
+      const mc = matchClock(elapsed, frzOf(m, p), p.clockMs, m.dur);
       const sc = scoreAt(m, mc.minute);
       return { a: m.a, b: m.b, ga: sc.ga, gb: sc.gb };
     }) : [];
@@ -477,7 +480,66 @@
     $("table-modal").classList.add("on");
   }
   document.querySelectorAll(".js-table").forEach((b) => b.addEventListener("click", openLiveTable));
+  document.querySelectorAll(".js-bracket").forEach((b) => b.addEventListener("click", openBracket));
+  $("bracket-modal").addEventListener("click", (e) => { if (e.target.id === "bracket-modal") $("bracket-modal").classList.remove("on"); });
   $("table-modal").addEventListener("click", (e) => { if (e.target.id === "table-modal") $("table-modal").classList.remove("on"); });
+
+  // Tableau du tournoi : progression de la poule + arbre à élimination directe.
+  function openBracket() {
+    const s0 = state.snap; if (!s0 || !s0.playing || !s0.playing.bracket) return;
+    const p = s0.playing, bk = p.bracket;
+    const nameOf = (id) => { const pl = s0.players.find((x) => x.pid === id); return pl ? pl.teamName : "?"; };
+    const meCls = (id) => (id === state.pid ? " me" : "");
+    const stages = Math.round(Math.log2(bk.koSize));
+    const labelOf = (left) => ({ 1: "Finale", 2: "Demi-finales", 3: "Quarts" })[left] || "Tour";
+
+    // — Poule : classement live (matchs passés + minute courante des matchs du jour)
+    const elapsed = Date.now() - p.startedAt;
+    const current = p.type === "league" ? p.matches.map((m) => {
+      const mc = matchClock(elapsed, frzOf(m, p), p.clockMs, m.dur);
+      const sc = scoreAt(m, mc.minute);
+      return { a: m.a, b: m.b, ga: sc.ga, gb: sc.gb };
+    }) : [];
+    const teams = s0.players.map((pl) => ({ id: pl.pid }));
+    const table = ENGINE.computeStandings(teams, (p.playedMatches || []).concat(current));
+    const pouleRows = table.map((r, i) =>
+      `<div class="bk-poule-row${i < bk.koSize ? " q" : ""}${meCls(r.id)}"><span>${i + 1}. ${esc(nameOf(r.id))}</span><span>${r.pts} pts</span></div>`).join("");
+    const pouleTitle = bk.leaguePlayed >= bk.leagueRounds
+      ? `✅ Poule terminée — top ${bk.koSize} qualifiés`
+      : `Poule — journée ${bk.leaguePlayed}/${bk.leagueRounds} · top ${bk.koSize} qualifiés`;
+
+    // — Arbre KO : tours joués (scores), tour en cours (LIVE), à venir (paires ou ?)
+    const cell = (top, bottom, cls) => `<div class="bk-match ${cls || ""}">${top}${bottom}</div>`;
+    const teamLine = (id, g, win, live) =>
+      `<div class="bk-team${win ? " win" : ""}${meCls(id)}"><span>${esc(nameOf(id))}</span><b>${live ? "🔴" : (g != null ? g : "")}</b></div>`;
+    const cols = [];
+    for (let i = 0; i < stages; i++) {
+      const label = labelOf(stages - i);
+      const nSlots = Math.pow(2, stages - 1 - i);
+      let cells = "";
+      const played = bk.rounds[i];
+      if (played) {
+        cells = played.map((m) => m.live
+          ? cell(teamLine(m.a, null, false, true), teamLine(m.b, null, false, true), "live")
+          : cell(teamLine(m.a, m.ga + (m.pens ? ` (${m.pens.pa})` : ""), m.winner === m.a),
+                 teamLine(m.b, m.gb + (m.pens ? ` (${m.pens.pb})` : ""), m.winner === m.b), "done")).join("");
+      } else if (i === bk.rounds.length && bk.next) {
+        cells = bk.next.map((pr) => cell(teamLine(pr[0], null, false, false), teamLine(pr[1], null, false, false), "next")).join("");
+      } else {
+        cells = Array.from({ length: nSlots }, () =>
+          cell('<div class="bk-team tbd"><span>À déterminer</span></div>', '<div class="bk-team tbd"><span>—</span></div>', "tbd")).join("");
+      }
+      cols.push(`<div class="bk-col"><div class="bk-stage">${label}</div>${cells}</div>`);
+    }
+    const champHtml = bk.champion != null
+      ? `<div class="bk-champ">🏆 Champion : <b>${esc(nameOf(bk.champion))}</b></div>` : "";
+
+    $("bracket-sheet").innerHTML = CLOSE_X + `
+      <div class="round-title" style="margin-top:0">🏆 Tableau du tournoi</div>
+      <div class="bk-poule"><div class="bk-poule-title">${pouleTitle}</div>${pouleRows}</div>
+      <div class="bk-wrap">${cols.join("")}</div>${champHtml}`;
+    $("bracket-modal").classList.add("on");
+  }
 
   function updateSndIcons() { document.querySelectorAll(".snd-ico").forEach((el) => { el.textContent = SND.muted ? "🔇" : "🔊"; }); }
   document.querySelectorAll(".js-sound").forEach((b) => b.addEventListener("click", () => {
@@ -564,20 +626,23 @@
   function setHtml(el, html) { if (el && el.__html !== html) { el.__html = html; el.innerHTML = html; } }
   function setText(el, txt) { if (el && el.__txt !== txt) { el.__txt = txt; el.textContent = txt; } }
 
-  // Horloge d'un match : linéaire 0'->90', figée `hold` ms sur chaque but.
-  // minuteF (continue) pilote la simulation ; holdT = avancement célébration.
-  function matchClock(elapsed, goals, clockMs, hold, dur) {
+  // Horloge d'un match : linéaire 0'->90', figée sur chaque gel (célébration
+  // de but `hold` ms, fenêtre de penalty `penHold` ms).
+  // minuteF (continue) pilote la simulation ; holdT = avancement du gel.
+  function matchClock(elapsed, freezes, clockMs, dur) {
     const D = dur || 90;
     let holds = 0;
-    for (const g of goals) {
-      const tg = (g.m / 90) * clockMs + holds;
+    for (const f of freezes) {
+      const tg = (f.m / 90) * clockMs + holds;
       if (elapsed < tg) break;
-      if (elapsed < tg + hold) return { minute: g.m, minuteF: g.m, holding: g, holdT: (elapsed - tg) / hold, ft: false };
-      holds += hold;
+      if (elapsed < tg + f.len) return { minute: f.m, minuteF: f.m, holding: f.ev, holdT: (elapsed - tg) / f.len, ft: false };
+      holds += f.len;
     }
     const mf = Math.max(0, Math.min(D, ((elapsed - holds) / clockMs) * 90));
     return { minute: Math.floor(mf), minuteF: mf, holding: null, holdT: 0, ft: elapsed - holds >= (clockMs * D) / 90 };
   }
+  // Gels d'un match (p = snap.playing) : penHold serveur, 0 en mode local.
+  const frzOf = (m, p) => ENGINE.freezesOf(m, p.goalHoldMs || 3500, p.penHoldMs || 0);
   const goalsOf = (m) => (m.events || []).filter((e) => e.type === "goal").sort((a, b) => a.m - b.m);
 
   function renderPlaying(s) {
@@ -598,7 +663,7 @@
     // jour que les chiffres/fils, pas de reconstruction -> pas de clignotement.
     const roundKey = s.code + "|" + p.stage + "|" + p.round;
     if (state.liveRoundKey !== roundKey) { state.watchKey = null; if (mine || isLocal) featured = mine || p.matches[0]; }
-    const evSig = featured ? (featured.events || []).length + ":" + featured.ga + "-" + featured.gb + ":" + (featured.stanceA || "") + (featured.stanceB || "") : "-";
+    const evSig = featured ? (featured.events || []).length + ":" + featured.ga + "-" + featured.gb + ":" + (featured.stanceA || "") + (featured.stanceB || "") + ":" + (featured.events || []).filter((e) => e.pending).length + ":" + (featured.dur || 90) : "-";
     const simKey = roundKey + "|" + (featured ? featured.a + ":" + featured.b : "-") + "|" + evSig;
     if (state.liveSimKey !== simKey) {
       state.liveRoundKey = roundKey;
@@ -618,7 +683,7 @@
       const hold = p.goalHoldMs || 3500;
       const loop = () => {
         if (!state.snap || state.snap.phase !== "playing" || !state.sim) return;
-        simTick(state.sim, matchClock(Date.now() - p.startedAt, goalsOf(featured), p.clockMs, hold, featured.dur), Date.now());
+        simTick(state.sim, matchClock(Date.now() - p.startedAt, frzOf(featured, p), p.clockMs, featured.dur), Date.now());
         state.simRaf = requestAnimationFrame(loop);
       };
       state.simRaf = requestAnimationFrame(loop);
@@ -635,6 +700,7 @@
           <span class="lc-score"><span id="live-ga">0</span> - <span id="live-gb">0</span></span>
           <span class="lc-team ${featured.b === state.pid ? "me" : ""}"><span class="lc-kit">${kitSvg(kitOf(featured.b))}</span><span class="lc-tname">${esc(featured.bn)}</span></span>
         </div>
+        <div class="lc-cards"><span id="live-cards-a"></span><span id="live-cards-b"></span></div>
         <div class="lc-pens" id="live-pens" style="display:none"></div>`;
     } else {
       $("live-card").innerHTML = `<div class="lc-stage">${esc(p.stage)} · MULTIPLEX <span class="live-min" id="live-min">0'</span></div>`;
@@ -738,7 +804,7 @@
         }
         const spot = final ? { x: ev.x, y: ev.y } : spotFor(rec, steer && ev ? ev : sb);
         const pd = clampV(Math.hypot(spot.x - sb.x, spot.y - sb.y) / 28, 0.35, 0.9);
-        segs.push({ type: "pass", t0: t, t1: t + pd, c: rec.idx, from: sb, to: spot });
+        segs.push({ type: "pass", t0: t, t1: t + pd, c: rec.idx, from: sb, to: spot, fin: final });
         sb = spot; t += pd; carrier = rec;
         if (final) {
           if (t < endT) segs.push({ type: "hold", t0: t, t1: endT, c: rec.idx, to: { x: ev.x, y: ev.y } });
@@ -754,10 +820,17 @@
       // Garantie : le ballon DOIT être au point de tir, dans les pieds du
       // tireur, avant la frappe — sinon passe corrective express.
       const shooterDot = ev.shooter || nearestTo(outfield(ev.side), ev);
+      // But rapproché du précédent : les segments d'après-but débordent sur
+      // l'action suivante — on les écourte pour laisser passe + tir visibles.
+      if (t > ev.m - LEAD - 0.1) {
+        const cut = Math.max(0.2, ev.m - LEAD - 0.55);
+        for (const g of segs) { if (g.t1 > cut) g.t1 = Math.max(g.t0, cut); }
+        t = cut;
+      }
       if (Math.hypot(sb.x - ev.x, sb.y - ev.y) > 4) {
         const p0 = Math.max(0, Math.min(t, ev.m - LEAD - 0.4));
         if (ev.m - LEAD - 0.05 > p0 + 0.05) {
-          segs.push({ type: "pass", t0: p0, t1: ev.m - LEAD - 0.05, c: shooterDot.idx, from: sb, to: { x: ev.x, y: ev.y } });
+          segs.push({ type: "pass", t0: p0, t1: ev.m - LEAD - 0.05, c: shooterDot.idx, from: sb, to: { x: ev.x, y: ev.y }, fin: true });
         }
         sb = { x: ev.x, y: ev.y }; t = ev.m - LEAD - 0.05; carrier = shooterDot; poss = ev.side;
       }
@@ -897,8 +970,8 @@
       const u0 = clampV((mf - seg.t0) / (seg.t1 - seg.t0 || 0.01), 0, 1);
       // inertie : le ballon part vite (frappé) puis freine (frottement)
       const u = seg.type === "shot" ? 1 - Math.pow(1 - u0, 1.45) : 1 - Math.pow(1 - u0, 1.85);
-      const tx = seg.type === "pass" && holder ? holder.x : seg.to.x;
-      const ty = seg.type === "pass" && holder ? holder.y : seg.to.y;
+      const tx = seg.type === "pass" && holder && !seg.fin ? holder.x : seg.to.x;
+      const ty = seg.type === "pass" && holder && !seg.fin ? holder.y : seg.to.y;
       bx = seg.from.x + (tx - seg.from.x) * u;
       by = seg.from.y + (ty - seg.from.y) * u;
     }
@@ -927,16 +1000,21 @@
     const nextSeg = sim.segs[sim.segIdx + 1];
     const anticip = seg.type === "hold" && nextSeg && nextSeg.type === "pass" ? sim.dots[nextSeg.c] : null;
 
+    // coulissement des blocs : les DEUX équipes suivent le ballon en x
+    const slideX = clampV((bx - 50) * 0.45, -17, 17);
     for (const d of sim.dots) {
       const shiftK = d.pos === "MID" ? 0.22 : d.pos === "FWD" ? 0.20 : 0.15;
-      let tx = d.home.x + clampV((bx - d.home.x) * shiftK, -12, 12);
-      let ty = d.home.y + clampV((by - d.home.y) * shiftK, -8, 8);
+      // l'équipe en possession pousse son bloc vers l'avant, l'autre se replie
+      const dirD = d.side === "a" ? 1 : -1;
+      const push = d.side === possSide ? 4.5 : -6.5;
+      let tx = clampV(d.home.x + slideX + dirD * push + clampV((bx - d.home.x) * shiftK, -9, 9) * 0.5, 3, 97);
+      let ty = d.home.y + clampV((by - d.home.y) * (shiftK + 0.05), -9, 9);
       let sp = 4.5; // replacement
       if (d.pos === "GK") {
         tx = d.home.x; ty = clampV(32 + (by - 32) * 0.25, 25, 39); sp = 5;
         if (seg.type === "shot" && seg.ev && d.side !== seg.ev.side) { ty = clampV(seg.to.y, 25.5, 38.5); sp = 16; }
       } else if (seg.type === "hold" && d === holder) { tx = seg.to.x; ty = seg.to.y; sp = 6; }
-      else if (seg.type === "pass" && d === holder) { tx = seg.to.x; ty = seg.to.y; sp = 11; }
+      else if (seg.type === "pass" && d === holder) { tx = seg.to.x; ty = seg.to.y; sp = seg.fin ? 16 : 11; }
       else if (d === presser) { tx = bx + (d.x - bx) * 0.1; ty = by + (d.y - by) * 0.1; sp = 9; }
       else if (d === anticip) { tx = nextSeg.to.x; ty = nextSeg.to.y; sp = 6.5; }
       else if (d === sup1 || d === sup2) {
@@ -946,7 +1024,7 @@
         sp = 6;
       } else if (holder && d.side === possSide && d.pos === "FWD" && ((possSide === "a" && bx > 62) || (possSide === "b" && bx < 38))) {
         // les attaquants plongent vers la surface quand le ballon approche
-        tx = d.home.x + (possSide === "a" ? 14 : -14);
+        tx = clampV(d.home.x + slideX * 0.6 + (possSide === "a" ? 14 : -14), 3, 97);
         ty = d.home.y + (32 - d.home.y) * 0.25;
         sp = 5.5;
       }
@@ -997,24 +1075,27 @@
   function drawLive(p, featured, isLocal) {
     const elapsed = Date.now() - p.startedAt;
     const hold = p.goalHoldMs || 3500;
-    const maxGoals = Math.max(0, ...p.matches.map((m) => goalsOf(m).length));
-    const maxDur = Math.max(90, ...p.matches.map((m) => m.dur || 90));
+    const endOf = (m) => (p.clockMs * (m.dur || 90)) / 90 + frzOf(m, p).reduce((t, f) => t + f.len, 0);
     const anyShootout = p.matches.some((m) => m.shootout && !m.shootout.done);
-    const ftAll = !anyShootout && elapsed >= (p.clockMs * maxDur) / 90 + maxGoals * hold;
+    const ftAll = !anyShootout && p.matches.every((m) => elapsed >= endOf(m));
 
     if (featured) {
-      const mc = matchClock(elapsed, goalsOf(featured), p.clockMs, hold, featured.dur);
+      const mc = matchClock(elapsed, frzOf(featured, p), p.clockMs, featured.dur);
       // Ambiance : sifflet d'engagement, clameur sur but (+ vibration),
       // "ooh" sur occasion, triple sifflet au coup de sifflet final.
       const snd = state.snd || (state.snd = {});
       if (snd.round !== state.liveRoundKey) { snd.round = state.liveRoundKey; snd.holdKey = null; snd.ft = false; snd.seen = 0; SND.whistle(1); }
       if (mc.holding) {
-        const hk = mc.holding.m + "|" + mc.holding.scorer;
+        const resolvedPen = mc.holding.pen && !mc.holding.pending;
+        const hk = mc.holding.m + "|" + mc.holding.scorer + "|" + (mc.holding.pending ? "?" : mc.holding.type);
         if (snd.holdKey !== hk) {
           snd.holdKey = hk;
-          SND.goal();
           const mySide = featured.a === state.pid ? "a" : featured.b === state.pid ? "b" : null;
-          vibe(mc.holding.side === mySide ? [90, 50, 90, 50, 280] : 160);
+          if (mc.holding.pending) { SND.whistle(1); vibe(120); } // faute sifflée !
+          else if (mc.holding.type === "goal") {
+            SND.goal();
+            vibe(mc.holding.side === mySide ? [90, 50, 90, 50, 280] : 160);
+          } else if (resolvedPen) { SND.ooh(); vibe(80); } // penalty raté/arrêté
         }
       }
       if (mc.ft && !snd.ft) { snd.ft = true; SND.whistle(3); }
@@ -1023,6 +1104,14 @@
       const sc = scoreAt(featured, mc.minute);
       setText($("live-ga"), String(sc.ga));
       setText($("live-gb"), String(sc.gb));
+      // cartons reçus jusqu'à la minute courante, illustrés sous le score
+      const cardsOf = (side) => {
+        const evs = (featured.events || []).filter((e) => e.m <= mc.minute && e.side === side);
+        const y = evs.filter((e) => e.type === "yellow").length, r = evs.filter((e) => e.type === "red").length;
+        return (y ? "🟨" + (y > 1 ? "×" + y : "") : "") + (r ? (y ? " " : "") + "🟥" + (r > 1 ? "×" + r : "") : "");
+      };
+      setText($("live-cards-a"), cardsOf("a"));
+      setText($("live-cards-b"), cardsOf("b"));
       const pensEl = $("live-pens");
       if (mc.ft && featured.pens) { pensEl.style.display = ""; setText(pensEl, `Tirs au but : ${featured.pens.pa} - ${featured.pens.pb}`); }
 
@@ -1092,9 +1181,48 @@
       $("instr-hint").style.display = "none";
     }
 
-    // Séance de tirs au but : panneau interactif
+    // Mini-cage 3 zones : où le tireur a frappé (⚽/❌) et où le gardien a plongé (🧤).
+    const penCage = (dir, dive, out) => {
+      const cell = (z) => `<i class="${dive === z ? "gk" : ""}${dir === z ? " shot" : ""}">${dive === z ? "🧤" : ""}${dir === z ? (out === "goal" ? "⚽" : dive === z ? "" : "❌") : ""}</i>`;
+      return `<div class="pen-goal">${cell("L")}${cell("C")}${cell("R")}</div>`;
+    };
+    const penBtns = (role) => `
+      <div class="pen-btns" data-role="${role}">
+        <button data-dir="L">⬅️ Gauche</button>
+        <button data-dir="C">⏺ Centre</button>
+        <button data-dir="R">➡️ Droite</button>
+      </div>`;
+
+    // Penalty en cours de match : la partie adverse choisit le plongeon.
+    const lp = featured && featured.livePen;
     const so = featured && featured.shootout;
-    if (so) {
+    if (lp) {
+      const secs = Math.max(0, Math.ceil((lp.deadline - Date.now()) / 1000));
+      const iKick = (lp.side === "a" ? featured.a : featured.b) === state.pid;
+      const iDive = (lp.side === "a" ? featured.b : featured.a) === state.pid;
+      const pickedKey = "lp:" + featured.a + ":" + featured.b + ":" + lp.m + ":" + state.pid;
+      const canPick = lp.phase === "await" && state.penPicked !== pickedKey && (iKick || iDive);
+      const outLine = lp.out === "goal" ? `✅ BUT ! ${esc(lp.scorer)} transforme !`
+        : lp.out === "saved" ? `🧤 ARRÊTÉ ! ${esc(lp.gkName)} était du bon côté !`
+        : `❌ À CÔTÉ ! ${esc(lp.scorer)} manque le cadre !`;
+      setHtml($("shootout"), `
+        <div class="pen-panel">
+          <div class="pen-title">🎯 PENALTY À LA ${lp.m}ᵉ !</div>
+          ${lp.phase === "await"
+            ? `<div class="pen-now">⚽ <b>${esc(lp.scorer)}</b> face à <b>${esc(lp.gkName)}</b>… <span class="pen-timer">${secs}s</span></div>`
+            : `${penCage(lp.dir, lp.dive, lp.out)}<div class="pen-now ${lp.out === "goal" ? "ok" : "ko"}">${outLine}</div>`}
+          ${canPick ? `<div class="pen-q">${iKick ? "Où tires-tu ?" : "Où plonge ton gardien ?"}</div>${penBtns(iKick ? "kick" : "dive")}`
+            : (lp.phase === "await" && (iKick || iDive) ? '<p class="hint">✓ Choix enregistré — suspense…</p>' : "")}
+        </div>`);
+      // son de révélation (une seule fois par penalty)
+      const snd2 = state.snd || (state.snd = {});
+      const lpKey = featured.a + ":" + featured.b + ":" + lp.m + ":" + lp.phase;
+      if (lp.phase === "reveal" && snd2.lpKey !== lpKey) {
+        snd2.lpKey = lpKey;
+        if (lp.out === "goal") SND.goal(); else SND.ooh();
+      }
+    } else if (so) {
+      // Séance de tirs au but : panneau interactif
       const secs = Math.max(0, Math.ceil((so.deadline - Date.now()) / 1000));
       const iKick = featured && ((so.kicker && so.kicker.side === "a" ? featured.a : featured.b) === state.pid);
       const iDive = featured && ((so.kicker && so.kicker.side === "a" ? featured.b : featured.a) === state.pid);
@@ -1111,14 +1239,10 @@
             ? `<div class="pen-now">🏁 ${so.pa > so.pb ? esc(featured.an) : esc(featured.bn)} l'emporte aux tirs au but !</div>`
             : so.phase === "await"
               ? `<div class="pen-now">🎯 <b>${esc(so.kicker.name)}</b> s'élance… <span class="pen-timer">${secs}s</span></div>`
-              : `<div class="pen-now ${last && last.scored ? "ok" : "ko"}">${last ? (last.scored ? `✅ BUT de ${esc(last.name)} !` : `🧤 ARRÊTÉ ! Le gardien était du bon côté`) : ""}</div>`}
-          ${canPick ? `
-            <div class="pen-q">${iKick ? "Où tires-tu ?" : "Où plonge ton gardien ?"}</div>
-            <div class="pen-btns" data-role="${iKick ? "kick" : "dive"}">
-              <button data-dir="L">⬅️ Gauche</button>
-              <button data-dir="C">⏺ Centre</button>
-              <button data-dir="R">➡️ Droite</button>
-            </div>` : (so.phase === "await" && (iKick || iDive) ? '<p class="hint">✓ Choix enregistré — suspense…</p>' : "")}
+              : `${last ? penCage(last.dir, last.dive, last.scored ? "goal" : (last.dir === last.dive ? "saved" : "off")) : ""}
+                 <div class="pen-now ${last && last.scored ? "ok" : "ko"}">${last ? (last.scored ? `✅ BUT de ${esc(last.name)} !` : last.dir === last.dive ? `🧤 ARRÊTÉ ! Le gardien était du bon côté` : `❌ MANQUÉ ! ${esc(last.name)} tire à côté !`) : ""}</div>`}
+          ${canPick ? `<div class="pen-q">${iKick ? "Où tires-tu ?" : "Où plonge ton gardien ?"}</div>${penBtns(iKick ? "kick" : "dive")}`
+            : (so.phase === "await" && (iKick || iDive) ? '<p class="hint">✓ Choix enregistré — suspense…</p>' : "")}
         </div>`);
     } else {
       setHtml($("shootout"), "");
@@ -1129,7 +1253,7 @@
     $("live-prev-title").style.display = others.length ? "" : "none";
     const kitOf2 = (pid) => { const pl = (state.snap.players || []).find((x) => x.pid === pid); return pl && pl.kit; };
     setHtml($("live-prev"), others.map((m) => {
-      const omc = matchClock(elapsed, goalsOf(m), p.clockMs, hold, m.dur);
+      const omc = matchClock(elapsed, frzOf(m, p), p.clockMs, m.dur);
       const sc = scoreAt(m, omc.minute);
       const lastGoal = goalsOf(m).filter((e) => e.m <= omc.minute).pop();
       const isMine = m.a === state.pid || m.b === state.pid;
@@ -1152,6 +1276,7 @@
   // ---------- Lobby ----------
   let qrDrawn = null;
   function renderLobby(s) {
+    state.tkToasted = false;
     const isLocal = s.code === "LOCAL";
     $("lobby-code").textContent = isLocal ? "📱" : s.code;
     $("lobby-code-big").textContent = s.code;
@@ -1238,7 +1363,15 @@
 
   // ---------- Draft ----------
   function renderDraft(s) {
-    const d = s.draft; if (!d) return;
+    const d = s.draft;
+    // mon effectif est complet : un rappel pour désigner le tireur de penalty
+    if (!state.tkToasted) {
+      const m0 = me();
+      if (m0 && m0.squad && m0.squad.length >= 13) {
+        state.tkToasted = true;
+        toast("🎯 Pense à choisir ton tireur de penalty dans « Ma compo » !");
+      }
+    } if (!d) return;
     if (d.auction) return renderAuction(s, d);
     $("auction-box").style.display = "none";
     $("cards-grid").style.display = "";
@@ -1597,6 +1730,7 @@
         if (params.get("open") === "compo") openCompo();
         else if (params.get("open") === "squads") openSquads();
         else if (params.get("open") === "table") openLiveTable();
+        else if (params.get("open") === "bracket") openBracket();
         else if (params.get("open") && state.matchMap && state.matchMap.size) matchModal(state.matchMap.values().next().value);
         const tb = params.get("tab");
         if (tb) { const el = document.querySelector(`.tab[data-tab="${tb}"]`); if (el) el.click(); }

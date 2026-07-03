@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Football Draft" />
   <title>Football Draft — Ultimate National Teams</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
-  <link rel="stylesheet" href="css/styles.css?v=28" />
+  <link rel="stylesheet" href="css/styles.css?v=29" />
 </head>
 <body>
   <div id="app">
@@ -172,6 +172,7 @@
       <div class="dock">
         <button class="dock-btn js-compo"><span class="dock-ico">👥</span><span class="dock-lbl">Ma compo</span></button>
         <button class="dock-btn js-table"><span class="dock-ico">📊</span><span class="dock-lbl">Classement</span></button>
+        <button class="dock-btn js-bracket"><span class="dock-ico">🏆</span><span class="dock-lbl">Tableau</span></button>
         <button class="dock-btn js-squads"><span class="dock-ico">📋</span><span class="dock-lbl">Compos</span></button>
         <button class="dock-btn js-reset"><span class="dock-ico">🔄</span><span class="dock-lbl">Reset</span></button>
       </div>
@@ -210,6 +211,9 @@
   <!-- Classement live -->
   <div id="table-modal" class="modal"><div class="match-sheet" id="table-sheet"></div></div>
 
+  <!-- Tableau du tournoi (poule + arbre à élimination directe) -->
+  <div id="bracket-modal" class="modal"><div class="match-sheet" id="bracket-sheet"></div></div>
+
   <!-- Toutes les compos -->
   <div id="squads-modal" class="modal"><div class="match-sheet" id="squads-sheet"></div></div>
 
@@ -219,10 +223,10 @@
   <!-- Feuille de match (temps forts + visuel façon FM) -->
   <div id="match-modal" class="modal"><div class="match-sheet" id="match-sheet"></div></div>
 
-  <script src="js/qrcode.js?v=28"></script>
-  <script src="js/model.js?v=28"></script>
-  <script src="js/engine.js?v=28"></script>
-  <script src="data/players.js?v=28"></script>
-  <script src="js/app.js?v=28"></script>
+  <script src="js/qrcode.js?v=29"></script>
+  <script src="js/model.js?v=29"></script>
+  <script src="js/engine.js?v=29"></script>
+  <script src="data/players.js?v=29"></script>
+  <script src="js/app.js?v=29"></script>
 </body>
 </html>

@@ -479,3 +479,60 @@ body {
 
 .ms-h2h { text-align: center; font-size: 12px; color: var(--muted); font-weight: 700; margin: 2px 0 6px; }
 .taker-btn { padding: 6px 12px; font-size: 12.5px; margin-left: 8px; }
+
+/* Mini-cage 3 zones : plongeon du gardien + direction du tir */
+.pen-goal { display: grid; grid-template-columns: repeat(3, 1fr); width: 168px; height: 58px;
+  margin: 2px auto 0; border: 3px solid #e8eef3; border-bottom: none; border-radius: 7px 7px 0 0;
+  background: repeating-linear-gradient(90deg, rgba(255,255,255,.07) 0 1px, transparent 1px 8px),
+              repeating-linear-gradient(0deg, rgba(255,255,255,.07) 0 1px, transparent 1px 8px); }
+.pen-goal i { display: grid; place-items: center; font-size: 19px; font-style: normal; letter-spacing: -4px; }
+.pen-goal i + i { border-left: 1px dashed rgba(255, 255, 255, .18); }
+.pen-goal i.shot { text-shadow: 0 0 12px rgba(0, 255, 135, .8); }
+
+/* ---------- v29 : cartons, bouton match suivant, croix compo ---------- */
+/* Cartons illustrés sous le score du direct */
+.lc-cards { display: flex; justify-content: space-between; padding: 0 14px; font-size: 13px;
+  letter-spacing: 1px; min-height: 18px; margin-top: 2px; }
+
+/* Le bouton "Match suivant" flotte au-dessus du dock : impossible à rater */
+#btn-next-match { position: fixed; left: 14px; right: 14px; bottom: 88px; z-index: 40; width: auto;
+  box-shadow: 0 10px 34px rgba(0, 255, 135, .4); animation: next-pulse 1.5s ease-in-out infinite; }
+@keyframes next-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 10px 34px rgba(0, 255, 135, .4); }
+  50% { transform: scale(1.025); box-shadow: 0 10px 40px rgba(0, 255, 135, .62); }
+}
+
+/* La croix des popins ne chevauche plus l'en-tête (badges note/alchimie) */
+.match-sheet .pitch-head { padding-right: 36px; }
+.match-sheet > .modal-close { background: rgba(0, 0, 0, .78); }
+
+/* Tableau du tournoi : poule + arbre KO */
+.bk-poule { background: var(--panel); border: 1px solid var(--panel-b); border-radius: 14px;
+  padding: 10px 12px; margin-bottom: 12px; }
+.bk-poule-title { font-size: 12px; font-weight: 900; letter-spacing: 1px; color: var(--muted);
+  text-transform: uppercase; margin-bottom: 6px; }
+.bk-poule-row { display: flex; justify-content: space-between; padding: 4px 2px; font-size: 13px;
+  font-weight: 700; border-bottom: 1px solid rgba(255, 255, 255, .05); }
+.bk-poule-row:last-child { border-bottom: 0; }
+.bk-poule-row.q span:first-child::after { content: " ✦"; color: var(--accent); }
+.bk-poule-row:not(.q) { opacity: .55; }
+.bk-poule-row.me span { color: var(--accent); }
+.bk-wrap { display: flex; gap: 10px; overflow-x: auto; padding: 4px 2px 10px; -webkit-overflow-scrolling: touch; }
+.bk-col { flex: 0 0 46%; min-width: 150px; display: flex; flex-direction: column; gap: 8px;
+  justify-content: space-around; }
+.bk-stage { text-align: center; font-size: 11.5px; font-weight: 900; letter-spacing: 1.5px;
+  color: var(--gold-a); text-transform: uppercase; }
+.bk-match { background: var(--panel); border: 1px solid var(--panel-b); border-radius: 12px;
+  padding: 7px 9px; display: grid; gap: 3px; }
+.bk-match.live { border-color: rgba(255, 90, 90, .55); }
+.bk-match.next { border-style: dashed; }
+.bk-match.tbd { opacity: .45; border-style: dashed; }
+.bk-team { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 700; }
+.bk-team span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bk-team b { font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.bk-team.win { color: var(--accent); }
+.bk-team.win b { color: var(--accent); }
+.bk-team.me span { text-shadow: 0 0 12px rgba(0, 255, 135, .5); }
+.bk-team.tbd { color: var(--muted); font-style: italic; }
+.bk-champ { text-align: center; font-size: 14.5px; font-weight: 800; color: var(--gold-a);
+  padding: 8px 0 2px; }

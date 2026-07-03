@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v20 — moteur façon FM";
+  const APP_VERSION = "v21 — maillots sur le terrain";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -561,7 +561,8 @@
     const dots = placement.filter((s) => s.player).map((s) => ({
       n: s.player.n, pos: s.slot.pos, p: slotPoint(s.slot, side),
     }));
-    return { dots, kit: (pl.kit && pl.kit.p) || (side === "a" ? "#e11d2a" : "#1f6feb") };
+    const kitFull = pl.kit || { p: side === "a" ? "#e11d2a" : "#1f6feb", s: "#ffffff", pat: "plain" };
+    return { dots, kit: kitFull.p, kitFull };
   }
 
   // ---------- Simulation continue du match (11v11 fluide) ----------
@@ -661,10 +662,21 @@
     return segs;
   }
 
+  // Motif de remplissage reprenant le maillot (rayures, cerceaux...).
+  function kitPatternDef(id, kit) {
+    const p = kit.p, sc = kit.s || "#ffffff", pat = kit.pat || "plain";
+    let inner = `<rect width="1" height="1" fill="${p}"/>`;
+    if (pat === "stripes") inner += `<rect x="0.12" width="0.16" height="1" fill="${sc}"/><rect x="0.44" width="0.16" height="1" fill="${sc}"/><rect x="0.76" width="0.16" height="1" fill="${sc}"/>`;
+    else if (pat === "hoops") inner += `<rect y="0.12" width="1" height="0.16" fill="${sc}"/><rect y="0.44" width="1" height="0.16" fill="${sc}"/><rect y="0.76" width="1" height="0.16" fill="${sc}"/>`;
+    else if (pat === "sash") inner += `<rect x="-0.3" y="0.38" width="1.6" height="0.24" transform="rotate(45 0.5 0.5)" fill="${sc}"/>`;
+    else if (pat === "halves") inner += `<rect x="0.5" width="0.5" height="1" fill="${sc}"/>`;
+    return `<pattern id="${id}" patternUnits="objectBoundingBox" patternContentUnits="objectBoundingBox" width="1" height="1">${inner}</pattern>`;
+  }
+
   // Construit la scène (22 joueurs + ballon) et l'état de simulation.
   function buildSim(match) {
     const A = teamSetup(match.a, "a"), B = teamSetup(match.b, "b");
-    if (A.kit.toLowerCase() === B.kit.toLowerCase()) B.kit = "#f1f3f5";
+    if (A.kit.toLowerCase() === B.kit.toLowerCase()) { B.kit = "#f1f3f5"; B.kitFull = { p: "#f1f3f5", s: "#20342a", pat: B.kitFull.pat }; }
     const rng = mulberry(((match.a * 73856093) ^ (match.b * 19349663)) >>> 0);
     const mk = (team, side) => team.dots.map((d) => ({
       name: d.n, pos: d.pos, side, home: d.p, x: d.p.x, y: d.p.y,
@@ -677,9 +689,13 @@
       x: clampV(ev.x, 4, 96), y: clampV(ev.y * 0.64, 6, 58),
       shooter: dots.find((d) => d.side === ev.side && d.name === ev.scorer) || null,
     }));
-    const svgDots = dots.map((d, i) =>
-      `<circle id="sd${i}" cx="${d.home.x.toFixed(1)}" cy="${d.home.y.toFixed(1)}" r="1.7" fill="${d.side === "a" ? A.kit : B.kit}" stroke="${d.pos === "GK" ? "#ffd54a" : "rgba(255,255,255,.55)"}" stroke-width="${d.pos === "GK" ? 0.6 : 0.35}"/>`).join("");
+    const svgDots = dots.map((d, i) => {
+      // le gardien reste en couleur unie cerclée de jaune pour rester lisible
+      const fill = d.pos === "GK" ? (d.side === "a" ? A.kit : B.kit) : `url(#kit${d.side})`;
+      return `<circle id="sd${i}" cx="${d.home.x.toFixed(1)}" cy="${d.home.y.toFixed(1)}" r="2" fill="${fill}" stroke="${d.pos === "GK" ? "#ffd54a" : "rgba(255,255,255,.6)"}" stroke-width="${d.pos === "GK" ? 0.6 : 0.4}"/>`;
+    }).join("");
     $("live-stage").innerHTML = `<div class="fm-pitch replay"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
+      <defs>${kitPatternDef("kita", A.kitFull)}${kitPatternDef("kitb", B.kitFull)}</defs>
       ${fmLinesSvg()}${svgDots}
       <circle id="sim-ball" cx="50" cy="32" r="1.15" fill="#fff" stroke="rgba(0,0,0,.45)" stroke-width="0.3"/>
     </svg></div>`;
@@ -702,7 +718,7 @@
     // Célébration : TOUT est figé, seul le buteur exulte.
     if (mc.holding) {
       const ge = sim.events.find((e) => e.type === "goal" && e.m === mc.holding.m && e.side === mc.holding.side);
-      if (ge && ge.shooter && ge.shooter.el) ge.shooter.el.setAttribute("r", (1.7 + Math.abs(Math.sin(mc.holdT * Math.PI * 3)) * 0.9).toFixed(2));
+      if (ge && ge.shooter && ge.shooter.el) ge.shooter.el.setAttribute("r", (2 + Math.abs(Math.sin(mc.holdT * Math.PI * 3)) * 0.9).toFixed(2));
       return;
     }
 
@@ -746,7 +762,7 @@
       const step = Math.min(dist, sp * dt);
       d.x = clampV(d.x + (dx / dist) * step, 2.5, 97.5);
       d.y = clampV(d.y + (dy / dist) * step, 3, 61);
-      if (d.el.getAttribute("r") !== "1.7") d.el.setAttribute("r", "1.7");
+      if (d.el.getAttribute("r") !== "2") d.el.setAttribute("r", "2");
       d.el.setAttribute("cx", d.x.toFixed(2));
       d.el.setAttribute("cy", d.y.toFixed(2));
     }

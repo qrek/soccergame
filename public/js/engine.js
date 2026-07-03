@@ -232,18 +232,24 @@
     return { country, code: list[0].code, options, relaxed: !stage.pos };
   }
 
-  // Ordre de diffusion des matchs : championnat journée par journée,
-  // puis phases finales tour par tour.
-  function buildReveal(t) {
-    const list = [];
-    t.matches.forEach((m) => list.push({ stage: "Journée " + m.round, type: "league", m }));
+  // Diffusion par JOURNÉE : tous les matchs d'une même journée se jouent en
+  // simultané (comme un vrai multiplex FM), puis les tours de phases finales.
+  function buildRounds(t) {
+    const rounds = [];
+    const byRound = new Map();
+    t.matches.forEach((m) => {
+      if (!byRound.has(m.round)) byRound.set(m.round, []);
+      byRound.get(m.round).push(m);
+    });
+    [...byRound.keys()].sort((a, b) => a - b).forEach((r) =>
+      rounds.push({ stage: "Journée " + r, type: "league", matches: byRound.get(r) }));
     if (t.knockout) {
       t.knockout.rounds.forEach((round, i) => {
-        const label = ({ 1: "Finale", 2: "Demi-finale", 3: "Quart de finale" })[t.knockout.rounds.length - i] || "Tour";
-        round.forEach((m) => list.push({ stage: label, type: "ko", m }));
+        const label = ({ 1: "Finale", 2: "Demi-finales", 3: "Quarts de finale" })[t.knockout.rounds.length - i] || "Tour";
+        rounds.push({ stage: label, type: "ko", matches: round });
       });
     }
-    return list;
+    return rounds;
   }
 
   function buildKnockout(standings, teamById, K) {
@@ -307,5 +313,5 @@
     };
   }
 
-  return { teamStrength, simulateMatch, simulateKnockout, roundRobin, computeStandings, seedFor, drawTeamForTurn, runTournament, buildReveal };
+  return { teamStrength, simulateMatch, simulateKnockout, roundRobin, computeStandings, seedFor, drawTeamForTurn, runTournament, buildRounds };
 });

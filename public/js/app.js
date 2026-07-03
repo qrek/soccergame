@@ -119,10 +119,10 @@
         budget: MODEL.BUDGET, budgetLeft: MODEL.BUDGET - cur.spent };
     }
     if (local.phase === "playing" && local.reveal) {
-      const { idx, list } = local.reveal;
-      const cur = list[Math.min(idx, list.length - 1)];
-      snap.playing = { idx: idx + 1, total: list.length, stage: cur.stage, type: cur.type, match: cur.m,
-        results: list.slice(0, idx).map((e) => ({ stage: e.stage, an: e.m.an, bn: e.m.bn, ga: e.m.ga, gb: e.m.gb, pens: e.m.pens || null })) };
+      const { roundIdx, rounds } = local.reveal;
+      const cur = rounds[Math.min(roundIdx, rounds.length - 1)];
+      snap.playing = { round: roundIdx + 1, totalRounds: rounds.length, stage: cur.stage, type: cur.type,
+        matches: cur.matches, startedAt: local.roundStartedAt, clockMs: 38000 };
     }
     if (local.phase === "results") snap.tournament = local.tournament;
     return snap;
@@ -168,9 +168,10 @@
         return { id: p.pid, name: p.name, players: p.squad, bonus: chem.bonus, chem: chem.teamChem };
       });
       local.tournament = ENGINE.runTournament(teams);
-      // Diffusion : on avance match par match avec le bouton.
+      // Diffusion : chaque journée se joue en direct, bouton pour enchaîner.
       local.phase = "playing";
-      local.reveal = { idx: 0, list: ENGINE.buildReveal(local.tournament) };
+      local.reveal = { roundIdx: 0, rounds: ENGINE.buildRounds(local.tournament) };
+      local.roundStartedAt = Date.now();
     } else {
       localPrepareTurn();
     }
@@ -182,8 +183,9 @@
     else if (type === "pick") localPick(extra.playerId);
     else if (type === "nextMatch") {
       if (local.phase === "playing" && local.reveal) {
-        local.reveal.idx++;
-        if (local.reveal.idx >= local.reveal.list.length) local.phase = "results";
+        local.reveal.roundIdx++;
+        local.roundStartedAt = Date.now();
+        if (local.reveal.roundIdx >= local.reveal.rounds.length) local.phase = "results";
         localRender();
       }
     }
@@ -277,45 +279,87 @@
   // ---------- Rendu principal ----------
   function render() {
     const s = state.snap; if (!s) return;
+    if (s.phase !== "playing") clearInterval(liveInterval);
     if (s.phase === "lobby") { renderLobby(s); show("screen-lobby"); }
     else if (s.phase === "draft") { renderDraft(s); show("screen-draft"); }
     else if (s.phase === "playing") { renderPlaying(s); show("screen-playing"); }
     else if (s.phase === "results") { renderResults(s); show("screen-results"); }
   }
 
-  // ---------- Diffusion des matchs (EN DIRECT) ----------
+  // ---------- Diffusion en direct façon FM (journée par journée) ----------
   const fmtM = (v) => (v >= 10 ? String(Math.round(v)) : String(v).replace(".", ",")) + " M€";
+  let liveInterval = null;
 
   function renderPlaying(s) {
     clearInterval(timerInterval);
     const p = s.playing; if (!p) return;
     const isLocal = s.code === "LOCAL";
-    $("play-stage").textContent = `${p.stage} · ${p.idx}/${p.total}`;
+    $("play-stage").textContent = `${p.stage} · ${p.round}/${p.totalRounds}`;
+    // Chacun suit SON match ; sans match (multiplex) on voit toute la journée.
+    const mine = isLocal ? null : p.matches.find((m) => m.a === state.pid || m.b === state.pid);
 
-    const m = p.match;
-    $("live-card").innerHTML = `
-      <div class="lc-stage">${esc(p.stage)}</div>
-      <div class="lc-row">
-        <span class="lc-team">${esc(m.an)}</span>
-        <span class="lc-score">${m.ga} - ${m.gb}</span>
-        <span class="lc-team">${esc(m.bn)}</span>
-      </div>
-      ${m.pens ? `<div class="lc-pens">Tirs au but : ${m.pens.pa} - ${m.pens.pb}</div>` : ""}`;
+    clearInterval(liveInterval);
+    const tick = () => {
+      const elapsed = Date.now() - p.startedAt;
+      const minute = Math.max(0, Math.min(90, Math.floor((elapsed / p.clockMs) * 90)));
+      drawLive(p, mine, minute, isLocal);
+    };
+    tick();
+    liveInterval = setInterval(tick, 400);
+  }
 
-    const goals = (m.events || []).filter((e) => e.type === "goal");
-    $("live-summary").innerHTML = goals.length
-      ? goals.map((e) => `<div class="evline goal"><span class="min">${e.m}'</span><span class="etxt">⚽ ${esc(e.scorer)} (${esc(e.teamName)})</span></div>`).join("")
-      : '<p class="hint">Aucun but — les défenses ont tenu bon.</p>';
+  // Score d'un match à la minute donnée.
+  function scoreAt(m, minute) {
+    if (minute >= 90) return { ga: m.ga, gb: m.gb };
+    let ga = 0, gb = 0;
+    (m.events || []).forEach((e) => { if (e.type === "goal" && e.m <= minute) { if (e.side === "a") ga++; else gb++; } });
+    return { ga, gb };
+  }
 
-    $("btn-next-match").style.display = isLocal ? "" : "none";
+  function drawLive(p, mine, minute, isLocal) {
+    const ft = minute >= 90;
+    const badge = ft ? '<span class="live-min ft">TERMINÉ</span>' : `<span class="live-min">⏱ ${minute}'</span>`;
+
+    if (mine) {
+      const sc = scoreAt(mine, minute);
+      $("live-card").innerHTML = `
+        <div class="lc-stage">${esc(p.stage)} · TON MATCH ${badge}</div>
+        <div class="lc-row">
+          <span class="lc-team">${esc(mine.an)}</span>
+          <span class="lc-score">${sc.ga} - ${sc.gb}</span>
+          <span class="lc-team">${esc(mine.bn)}</span>
+        </div>
+        ${ft && mine.pens ? `<div class="lc-pens">Tirs au but : ${mine.pens.pa} - ${mine.pens.pb}</div>` : ""}
+        ${fmPitchHtml(mine.events, minute)}`;
+      const evs = (mine.events || []).filter((e) => e.m <= minute).sort((a, b) => b.m - a.m);
+      $("live-summary").innerHTML = `<div class="live-feed">${
+        evs.map((e) => `<div class="evline ${e.type === "goal" ? "goal" : ""}"><span class="min">${e.m}'</span><span class="etxt">${esc(e.text)}</span></div>`).join("")
+        || `<div class="evline"><span class="min">1'</span><span class="etxt">🟢 Coup d'envoi !</span></div>`}</div>`;
+    } else {
+      $("live-card").innerHTML = `<div class="lc-stage">${esc(p.stage)} · MULTIPLEX ${badge}</div>`;
+      $("live-summary").innerHTML = "";
+    }
+
+    const others = p.matches.filter((m) => m !== mine);
+    $("live-prev-title").textContent = mine ? "Multiplex — les autres matchs" : "Tous les matchs";
+    $("live-prev-title").style.display = others.length ? "" : "none";
+    $("live-prev").innerHTML = others.map((m) => {
+      const sc = scoreAt(m, minute);
+      const lastGoal = (m.events || []).filter((e) => e.type === "goal" && e.m <= minute).pop();
+      return `<div class="match">
+        <span class="side"><span>${esc(m.an)}</span></span>
+        <span class="score">${sc.ga}-${sc.gb}${ft && m.pens ? `<span class="pens"> (${m.pens.pa}-${m.pens.pb})</span>` : ""}</span>
+        <span class="side" style="justify-content:flex-end"><span>${esc(m.bn)}</span></span>
+      </div>${lastGoal && !ft ? `<div class="mplex-last">⚽ ${lastGoal.m}' ${esc(lastGoal.scorer)}</div>` : ""}`;
+    }).join("");
+
+    // Journée suivante : en local un bouton au coup de sifflet final,
+    // en ligne le serveur avance seul quand tous les matchs sont finis.
+    const nextBtn = $("btn-next-match");
+    nextBtn.style.display = isLocal && ft ? "" : "none";
+    nextBtn.textContent = p.round >= p.totalRounds ? "Voir les résultats 🏆" : "Journée suivante ▶";
     $("btn-skip").style.display = !isLocal && isHost() ? "" : "none";
-
-    const prev = (p.results || []).slice(-8).reverse();
-    $("live-prev-title").style.display = prev.length ? "" : "none";
-    $("live-prev").innerHTML = prev.map((r) => `
-      <div class="match"><span class="side"><span>${esc(r.an)}</span></span>
-      <span class="score">${r.ga}-${r.gb}${r.pens ? `<span class="pens"> (${r.pens.pa}-${r.pens.pb})</span>` : ""}</span>
-      <span class="side" style="justify-content:flex-end"><span>${esc(r.bn)}</span></span></div>`).join("");
+    if (!isLocal && ft) $("live-summary").insertAdjacentHTML("beforeend", '<p class="hint">Tous les matchs sont terminés — journée suivante dans un instant…</p>');
   }
 
   // ---------- Lobby ----------
@@ -599,10 +643,28 @@
   const EV_COLOR = { goal: "#2fe38a", saved: "#14a0ff", off: "#8aa3ba", post: "#f0b429" };
   const EV_LABEL = { goal: "But", saved: "Arrêt", off: "Tir manqué", post: "Poteau" };
 
+  // Terrain FM horizontal avec les actions (jusqu'à une minute donnée).
+  function fmPitchHtml(events, minuteLimit) {
+    const dots = (events || []).filter((e) => e.m <= minuteLimit).map((ev) =>
+      `<circle class="fm-dot" cx="${ev.x}" cy="${ev.y * 0.64}" r="${ev.type === "goal" ? 3 : 2.1}" fill="${EV_COLOR[ev.type]}"/>`).join("");
+    return `<div class="fm-pitch"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
+      <g fill="none" stroke="rgba(255,255,255,.38)" stroke-width="0.45">
+        <rect x="1.5" y="1.5" width="97" height="61"/>
+        <line x1="50" y1="1.5" x2="50" y2="62.5"/><circle cx="50" cy="32" r="9.5"/>
+        <rect x="1.5" y="16" width="13" height="32"/><rect x="1.5" y="25" width="5" height="14"/>
+        <path d="M 14.5 26 A 8 8 0 0 1 14.5 38"/>
+        <rect x="85.5" y="16" width="13" height="32"/><rect x="93.5" y="25" width="5" height="14"/>
+        <path d="M 85.5 38 A 8 8 0 0 1 85.5 26"/>
+        <path d="M 1.5 5 A 3.5 3.5 0 0 0 5 1.5"/><path d="M 95 1.5 A 3.5 3.5 0 0 0 98.5 5"/>
+        <path d="M 1.5 59 A 3.5 3.5 0 0 1 5 62.5"/><path d="M 95 62.5 A 3.5 3.5 0 0 1 98.5 59"/>
+      </g>
+      <g fill="rgba(255,255,255,.5)"><circle cx="50" cy="32" r="0.8"/><circle cx="10" cy="32" r="0.8"/><circle cx="90" cy="32" r="0.8"/></g>
+      ${dots}
+    </svg></div>`;
+  }
+
   function matchModal(mm) {
     const evs = mm.events || [];
-    const dots = evs.map((ev) =>
-      `<circle class="fm-dot" cx="${ev.x}" cy="${ev.y * 0.64}" r="${ev.type === "goal" ? 3 : 2.1}" fill="${EV_COLOR[ev.type]}"/>`).join("");
     const legend = Object.keys(EV_LABEL).map((k) => `<span><i style="background:${EV_COLOR[k]}"></i>${EV_LABEL[k]}</span>`).join("");
     const lines = evs.length ? evs.map((ev) =>
       `<div class="evline ${ev.type === "goal" ? "goal" : ""}"><span class="min">${ev.m}'</span><span class="etxt">${esc(ev.text)}</span></div>`).join("")
@@ -616,20 +678,7 @@
       </div>
       ${mm.pens ? `<div class="ms-pens">Tirs au but : ${mm.pens.pa} - ${mm.pens.pb}</div>` : ""}
       <div class="fm-legend">${legend}</div>
-      <div class="fm-pitch"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
-        <g fill="none" stroke="rgba(255,255,255,.38)" stroke-width="0.45">
-          <rect x="1.5" y="1.5" width="97" height="61"/>
-          <line x1="50" y1="1.5" x2="50" y2="62.5"/><circle cx="50" cy="32" r="9.5"/>
-          <rect x="1.5" y="16" width="13" height="32"/><rect x="1.5" y="25" width="5" height="14"/>
-          <path d="M 14.5 26 A 8 8 0 0 1 14.5 38"/>
-          <rect x="85.5" y="16" width="13" height="32"/><rect x="93.5" y="25" width="5" height="14"/>
-          <path d="M 85.5 38 A 8 8 0 0 1 85.5 26"/>
-          <path d="M 1.5 5 A 3.5 3.5 0 0 0 5 1.5"/><path d="M 95 1.5 A 3.5 3.5 0 0 0 98.5 5"/>
-          <path d="M 1.5 59 A 3.5 3.5 0 0 1 5 62.5"/><path d="M 95 62.5 A 3.5 3.5 0 0 1 98.5 59"/>
-        </g>
-        <g fill="rgba(255,255,255,.5)"><circle cx="50" cy="32" r="0.8"/><circle cx="10" cy="32" r="0.8"/><circle cx="90" cy="32" r="0.8"/></g>
-        ${dots}
-      </svg></div>
+      ${fmPitchHtml(evs, 999)}
       <div class="fm-events">${lines}</div>
       <p class="ms-note">Les frappes citent la note de tir du joueur et la défense adverse : c'est ainsi que l'algorithme départage les équipes.</p>`;
     $("match-modal").classList.add("on");
@@ -669,7 +718,10 @@
     if (mock) {
       document.body.classList.add("no-anim");
       fetch("_mock/" + mock + ".json").then((r) => r.json()).then((d) => {
-        state.code = d.snap.code; state.pid = d.viewPid; state.snap = d.snap; render();
+        state.code = d.snap.code; state.pid = d.viewPid; state.snap = d.snap;
+        // En démo, rejoue le direct depuis le coup d'envoi.
+        if (d.snap.playing) { d.snap.playing.startedAt = Date.now(); d.snap.playing.clockMs = parseInt(params.get("clock"), 10) || 38000; }
+        render();
         if (params.get("open") && state.matchMap && state.matchMap.size) matchModal(state.matchMap.values().next().value);
         const tb = params.get("tab");
         if (tb) { const el = document.querySelector(`.tab[data-tab="${tb}"]`); if (el) el.click(); }

@@ -19,7 +19,8 @@ const PLAYERS = RAW_PLAYERS.map((p, i) => ({ id: i, ...p }));
 const PORT = process.env.PORT || 3000;
 const TURN_SECONDS = 45;
 const SQUAD_SIZE = 11; // toutes les équipes ont 11 joueurs
-const REVEAL_MS = parseInt(process.env.REVEAL_MS, 10) || 6500; // rythme de diffusion des matchs
+const MATCH_MS = parseInt(process.env.MATCH_MS, 10) || 38000; // durée du direct d'une journée (0' -> 90')
+const PAUSE_MS = parseInt(process.env.PAUSE_MS, 10) || 6000;  // pause score final avant la journée suivante
 const PUBLIC_DIR = path.join(__dirname, "public");
 
 // ---------------------------------------------------------------------------
@@ -125,15 +126,16 @@ function snapshot(room) {
   }
 
   if (room.phase === "playing" && room.reveal) {
-    const { idx, list } = room.reveal;
-    const cur = list[Math.min(idx, list.length - 1)];
+    const { roundIdx, rounds, startedAt } = room.reveal;
+    const cur = rounds[Math.min(roundIdx, rounds.length - 1)];
     snap.playing = {
-      idx: idx + 1,
-      total: list.length,
+      round: roundIdx + 1,
+      totalRounds: rounds.length,
       stage: cur.stage,
       type: cur.type,
-      match: cur.m,
-      results: list.slice(0, idx).map((e) => ({ stage: e.stage, an: e.m.an, bn: e.m.bn, ga: e.m.ga, gb: e.m.gb, pens: e.m.pens || null })),
+      matches: cur.matches,
+      startedAt,
+      clockMs: MATCH_MS,
     };
   }
 
@@ -234,20 +236,26 @@ function finishDraft(room) {
     return { id: p.pid, name: p.teamName || p.name, players: sp, bonus: chem.bonus, chem: chem.teamChem };
   });
   room.fullTournament = engine.runTournament(teams);
-  // Diffusion : les matchs sont révélés un par un avant l'écran final.
+  // Diffusion en direct : chaque journée se joue en simultané (0' -> 90'),
+  // on n'avance que quand tous les matchs de la journée sont terminés.
   room.phase = "playing";
-  room.reveal = { idx: 0, list: engine.buildReveal(room.fullTournament) };
-  clearInterval(room.revealTimer);
-  room.revealTimer = setInterval(() => {
-    room.reveal.idx++;
-    if (room.reveal.idx >= room.reveal.list.length) finishReveal(room);
-    else broadcast(room);
-  }, REVEAL_MS);
+  room.reveal = { roundIdx: 0, rounds: engine.buildRounds(room.fullTournament), startedAt: 0 };
+  startRound(room);
+}
+
+function startRound(room) {
+  room.reveal.startedAt = Date.now();
+  clearTimeout(room.revealTimer);
+  room.revealTimer = setTimeout(() => {
+    room.reveal.roundIdx++;
+    if (room.reveal.roundIdx >= room.reveal.rounds.length) finishReveal(room);
+    else startRound(room);
+  }, MATCH_MS + PAUSE_MS);
   broadcast(room);
 }
 
 function finishReveal(room) {
-  clearInterval(room.revealTimer);
+  clearTimeout(room.revealTimer);
   room.phase = "results";
   room.tournament = room.fullTournament;
   broadcast(room);
@@ -335,7 +343,7 @@ const ACTIONS = {
   playAgain(msg) {
     const room = rooms.get(msg.code);
     if (!room || msg.pid !== room.hostPid) return { ok: false };
-    clearInterval(room.revealTimer);
+    clearTimeout(room.revealTimer);
     room.phase = "lobby";
     room.draft = null;
     room.tournament = null;

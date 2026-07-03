@@ -141,6 +141,10 @@ function snapshot(room) {
       startedAt,
       clockMs: MATCH_MS,
       goalHoldMs: GOAL_HOLD_MS,
+      // matchs de championnat déjà terminés (pour le classement live)
+      playedMatches: rounds.slice(0, roundIdx)
+        .filter((r) => r.type === "league")
+        .flatMap((r) => r.matches.map((m) => ({ a: m.a, b: m.b, ga: m.ga, gb: m.gb }))),
     };
   }
 

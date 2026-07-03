@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v15 — barre de jeu";
+  const APP_VERSION = "v16 — classement live";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -125,7 +125,9 @@
       const { roundIdx, rounds } = local.reveal;
       const cur = rounds[Math.min(roundIdx, rounds.length - 1)];
       snap.playing = { round: roundIdx + 1, totalRounds: rounds.length, stage: cur.stage, type: cur.type,
-        matches: cur.matches, startedAt: local.roundStartedAt, clockMs: 52000, goalHoldMs: 3500 };
+        matches: cur.matches, startedAt: local.roundStartedAt, clockMs: 52000, goalHoldMs: 3500,
+        playedMatches: rounds.slice(0, roundIdx).filter((r) => r.type === "league")
+          .flatMap((r) => r.matches.map((m) => ({ a: m.a, b: m.b, ga: m.ga, gb: m.gb }))) };
     }
     if (local.phase === "results") snap.tournament = local.tournament;
     return snap;
@@ -294,6 +296,35 @@
     $("squads-sheet").innerHTML = `<div class="round-title" style="margin-top:0">Toutes les compos</div>` + squadsHtml(state.snap.players);
     $("squads-modal").classList.add("on");
   }
+  function openLiveTable() {
+    const s0 = state.snap; if (!s0 || !s0.playing) return;
+    const p = s0.playing;
+    const elapsed = Date.now() - p.startedAt;
+    const hold = p.goalHoldMs || 3500;
+    const current = p.type === "league" ? p.matches.map((m) => {
+      const mc = matchClock(elapsed, goalsOf(m), p.clockMs, hold);
+      const sc = scoreAt(m, mc.minute);
+      return { a: m.a, b: m.b, ga: sc.ga, gb: sc.gb };
+    }) : [];
+    const teams = s0.players.map((pl) => ({ id: pl.pid }));
+    const table = ENGINE.computeStandings(teams, (p.playedMatches || []).concat(current));
+    const nameOf = (id) => { const pl = s0.players.find((x) => x.pid === id); return pl ? pl.teamName : "?"; };
+    const K = teams.length >= 8 ? 8 : teams.length >= 4 ? 4 : 2;
+    $("table-sheet").innerHTML = `
+      <div class="round-title" style="margin-top:0">📊 Classement live${p.type === "league" ? " · " + esc(p.stage) : " · championnat terminé"}</div>
+      <table class="ltable">
+        <tr><th>#</th><th style="text-align:left">Équipe</th><th>J</th><th>DIFF</th><th>PTS</th></tr>
+        ${table.map((r, i) => `<tr class="${i < K ? "qualif" : ""} ${r.id === state.pid ? "meline" : ""}">
+          <td class="rk">${i + 1}</td>
+          <td class="tname">${esc(nameOf(r.id))}${r.id === state.pid ? ' <span class="you-tag">TOI</span>' : ""}</td>
+          <td>${r.played}</td><td>${r.gd > 0 ? "+" : ""}${r.gd}</td><td class="pts">${r.pts}</td></tr>`).join("")}
+      </table>
+      <p class="hint">Mis à jour en direct avec les buts · les ${K} premiers vont en phases finales</p>`;
+    $("table-modal").classList.add("on");
+  }
+  document.querySelectorAll(".js-table").forEach((b) => b.addEventListener("click", openLiveTable));
+  $("table-modal").addEventListener("click", (e) => { if (e.target.id === "table-modal") $("table-modal").classList.remove("on"); });
+
   document.querySelectorAll(".js-compo").forEach((b) => b.addEventListener("click", openCompo));
   document.querySelectorAll(".js-squads").forEach((b) => b.addEventListener("click", openSquads));
   $("compo-modal").addEventListener("click", (e) => { if (e.target.id === "compo-modal") $("compo-modal").classList.remove("on"); });
@@ -1054,6 +1085,7 @@
         render();
         if (params.get("open") === "compo") openCompo();
         else if (params.get("open") === "squads") openSquads();
+        else if (params.get("open") === "table") openLiveTable();
         else if (params.get("open") && state.matchMap && state.matchMap.size) matchModal(state.matchMap.values().next().value);
         const tb = params.get("tab");
         if (tb) { const el = document.querySelector(`.tab[data-tab="${tb}"]`); if (el) el.click(); }

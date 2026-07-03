@@ -342,9 +342,9 @@ body {
 .order-sep { color: var(--muted); font-size: 11px; flex-shrink: 0; opacity: .6; }
 
 /* Barre de jeu mobile : items discrets + bouton central rond lumineux */
-.screen#screen-draft, .screen#screen-playing { padding-bottom: 108px; }
+.screen#screen-draft, .screen#screen-playing { padding-bottom: 96px; }
 .dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
-  display: flex; align-items: flex-end; justify-content: space-around;
+  display: flex; align-items: center; justify-content: space-around;
   background: linear-gradient(180deg, rgba(12, 20, 15, .92), rgba(5, 9, 7, .99));
   border-top: 1px solid rgba(0, 255, 135, .16); border-radius: 22px 22px 0 0;
   padding: 8px 6px calc(7px + env(safe-area-inset-bottom));
@@ -356,14 +356,6 @@ body {
 .dock-btn:active { transform: scale(.92); }
 .dock-btn:active .dock-ico { opacity: 1; filter: none; }
 .dock-btn:active .dock-lbl { color: var(--accent); }
-.dock-center { background: none; border: none; display: flex; flex-direction: column; align-items: center;
-  gap: 5px; cursor: pointer; margin-top: -28px; padding: 0 10px; }
-.dock-center .dock-circle { width: 60px; height: 60px; border-radius: 50%; display: grid; place-items: center;
-  font-size: 26px; background: linear-gradient(160deg, var(--accent), var(--accent2));
-  border: 3px solid rgba(6, 10, 8, .95);
-  box-shadow: 0 0 26px rgba(0, 255, 135, .5), 0 10px 22px rgba(0, 0, 0, .5); transition: transform .1s; }
-.dock-center:active .dock-circle { transform: scale(.92); }
-.dock-center .dock-lbl { font-size: 10px; font-weight: 900; letter-spacing: .8px; text-transform: uppercase; color: var(--accent); }
 
 /* Maillots dans le tableau de score du direct + multiplex */
 .lc-team { display: flex; flex-direction: column; align-items: center; gap: 5px; }
@@ -389,3 +381,6 @@ body {
   padding: 8px 11px; font-weight: 900; font-size: 14.5px; }
 .ms-chip b { color: var(--accent); }
 .ms-chip.done { color: var(--accent); font-size: 13px; }
+
+/* Ligne du classement live me concernant */
+.ltable tr.meline td { color: var(--accent); }

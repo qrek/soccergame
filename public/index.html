@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#04121f" />
   <title>Football Draft — Ultimate National Teams</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
-  <link rel="stylesheet" href="css/styles.css?v=15" />
+  <link rel="stylesheet" href="css/styles.css?v=16" />
 </head>
 <body>
   <div id="app">
@@ -111,8 +111,8 @@
       <div class="cards-grid" id="cards-grid"></div>
       <div class="my-squad-mini" id="my-squad-mini"></div>
       <div class="dock">
+        <button class="dock-btn js-compo"><span class="dock-ico">👥</span><span class="dock-lbl">Ma compo</span></button>
         <button class="dock-btn js-squads"><span class="dock-ico">📋</span><span class="dock-lbl">Compos</span></button>
-        <button class="dock-center js-compo"><span class="dock-circle">👥</span><span class="dock-lbl">Ma compo</span></button>
         <button class="dock-btn js-reset"><span class="dock-ico">🔄</span><span class="dock-lbl">Reset</span></button>
       </div>
     </section>
@@ -133,8 +133,9 @@
         <div id="live-prev"></div>
       </div>
       <div class="dock">
+        <button class="dock-btn js-compo"><span class="dock-ico">👥</span><span class="dock-lbl">Ma compo</span></button>
+        <button class="dock-btn js-table"><span class="dock-ico">📊</span><span class="dock-lbl">Classement</span></button>
         <button class="dock-btn js-squads"><span class="dock-ico">📋</span><span class="dock-lbl">Compos</span></button>
-        <button class="dock-center js-compo"><span class="dock-circle">👥</span><span class="dock-lbl">Ma compo</span></button>
         <button class="dock-btn js-reset"><span class="dock-ico">🔄</span><span class="dock-lbl">Reset</span></button>
       </div>
     </section>
@@ -169,6 +170,9 @@
   <!-- Carte joueur affichée en plein écran au clic -->
   <div id="card-modal" class="modal"><div class="modal-inner" id="card-modal-inner"></div></div>
 
+  <!-- Classement live -->
+  <div id="table-modal" class="modal"><div class="match-sheet" id="table-sheet"></div></div>
+
   <!-- Toutes les compos -->
   <div id="squads-modal" class="modal"><div class="match-sheet" id="squads-sheet"></div></div>
 
@@ -178,10 +182,10 @@
   <!-- Feuille de match (temps forts + visuel façon FM) -->
   <div id="match-modal" class="modal"><div class="match-sheet" id="match-sheet"></div></div>
 
-  <script src="js/qrcode.js?v=15"></script>
-  <script src="js/model.js?v=15"></script>
-  <script src="js/engine.js?v=15"></script>
-  <script src="data/players.js?v=15"></script>
-  <script src="js/app.js?v=15"></script>
+  <script src="js/qrcode.js?v=16"></script>
+  <script src="js/model.js?v=16"></script>
+  <script src="js/engine.js?v=16"></script>
+  <script src="data/players.js?v=16"></script>
+  <script src="js/app.js?v=16"></script>
 </body>
 </html>

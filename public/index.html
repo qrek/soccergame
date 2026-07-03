@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Football Draft" />
   <title>Football Draft — Ultimate National Teams</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
-  <link rel="stylesheet" href="css/styles.css?v=26" />
+  <link rel="stylesheet" href="css/styles.css?v=27" />
 </head>
 <body>
   <div id="app">
@@ -134,6 +134,12 @@
         <div class="live-card" id="live-card"></div>
         <div id="live-stage"></div>
         <div id="live-summary"></div>
+        <div class="instr-row" id="instr-row" style="display:none">
+          <button class="instr-btn" data-st="off">🔥 Offensif</button>
+          <button class="instr-btn" data-st="bal">⚖️ Équilibré</button>
+          <button class="instr-btn" data-st="def">🧱 Bloc bas</button>
+        </div>
+        <p class="hint" id="instr-hint" style="display:none"></p>
         <button class="btn btn-primary" id="btn-next-match" style="display:none">Match suivant ▶</button>
         <button class="btn btn-ghost btn-wide" id="btn-skip" style="display:none">Passer la diffusion ⏭</button>
         <div class="round-title" id="live-prev-title" style="display:none">Déjà joués</div>
@@ -189,10 +195,10 @@
   <!-- Feuille de match (temps forts + visuel façon FM) -->
   <div id="match-modal" class="modal"><div class="match-sheet" id="match-sheet"></div></div>
 
-  <script src="js/qrcode.js?v=26"></script>
-  <script src="js/model.js?v=26"></script>
-  <script src="js/engine.js?v=26"></script>
-  <script src="data/players.js?v=26"></script>
-  <script src="js/app.js?v=26"></script>
+  <script src="js/qrcode.js?v=27"></script>
+  <script src="js/model.js?v=27"></script>
+  <script src="js/engine.js?v=27"></script>
+  <script src="data/players.js?v=27"></script>
+  <script src="js/app.js?v=27"></script>
 </body>
 </html>

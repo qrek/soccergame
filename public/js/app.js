@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v26 — alchimie club + popins";
+  const APP_VERSION = "v27 — rotation, forme, instructions";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -164,10 +164,16 @@
 
   function localSnapshot() {
     const players = local.players.map((p) => {
-      const chem = MODEL.chemistry(p.squad, p.formationKey);
+      const t0 = local.tstate;
+      const sq = p.squad.map((pl) => Object.assign({}, pl, {
+        fat: t0 ? (t0.fatigue[pl.id] || 0) : 0,
+        susp: t0 ? (t0.suspended[pl.id] || 0) > 0 : false,
+      }));
+      const chem = MODEL.chemistry(sq, p.formationKey);
       return { pid: p.pid, name: p.name, connected: true, isHost: p.pid === 1, formationKey: p.formationKey,
-        teamName: p.name, kit: p.kit, squad: p.squad, squadCount: p.squad.length,
-        strength: ENGINE.teamStrength(p.squad), chem: chem.teamChem, chemBonus: chem.bonus };
+        teamName: p.name, kit: p.kit, squad: sq, squadCount: sq.length,
+        strength: ENGINE.teamStrength(MODEL.placeInSlots(sq, p.formationKey).filter((x) => x.player).map((x) => x.player)),
+        chem: chem.teamChem, chemBonus: chem.bonus };
     });
     const snap = { code: "LOCAL", phase: local.phase, hostPid: 1, squadSize: 11, players };
     if (local.phase === "draft" && local.draft) {
@@ -178,13 +184,12 @@
         team: d.currentTeam, needed: localNeeded(cur), deadline: 0,
         budget: MODEL.BUDGET, budgetLeft: MODEL.BUDGET - cur.spent, rerollsLeft: cur.rerolls || 0, order: d.order.slice(0, local.players.length) };
     }
-    if (local.phase === "playing" && local.reveal) {
-      const { roundIdx, rounds } = local.reveal;
-      const cur = rounds[Math.min(roundIdx, rounds.length - 1)];
-      snap.playing = { round: roundIdx + 1, totalRounds: rounds.length, stage: cur.stage, type: cur.type,
-        matches: cur.matches, startedAt: local.roundStartedAt, clockMs: 44000, goalHoldMs: 3500,
-        playedMatches: rounds.slice(0, roundIdx).filter((r) => r.type === "league")
-          .flatMap((r) => r.matches.map((m) => ({ a: m.a, b: m.b, ga: m.ga, gb: m.gb }))) };
+    if (local.phase === "playing" && local.reveal && local.reveal.current) {
+      const cur = local.reveal.current;
+      snap.playing = { round: local.reveal.idx + 1, totalRounds: local.tstate.totalRounds, stage: cur.stage, type: cur.type,
+        matches: cur.matches.map(ENGINE.publicMatch), startedAt: local.roundStartedAt, clockMs: 44000, goalHoldMs: 3500,
+        playedMatches: local.tstate.playedLeague.filter((m) => cur.matches.indexOf(m) < 0)
+          .map((m) => ({ a: m.a, b: m.b, ga: m.ga, gb: m.gb })) };
     }
     if (local.phase === "results") snap.tournament = local.tournament;
     return snap;
@@ -209,7 +214,7 @@
     const pids = local.players.map((p) => p.pid);
     for (let i = pids.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pids[i], pids[j]] = [pids[j], pids[i]]; }
     const order = [];
-    for (let r = 0; r < 11; r++) order.push(...(r % 2 === 0 ? pids : pids.slice().reverse()));
+    for (let r = 0; r < 13; r++) order.push(...(r % 2 === 0 ? pids : pids.slice().reverse()));
     local.draft = { order, pickNum: 0, currentPid: order[0], currentTeam: null };
     local.phase = "draft";
     localPrepareTurn();
@@ -226,14 +231,11 @@
     cur.spent += MODEL.marketValue(LPLAYERS[playerId]);
     d.pickNum++;
     if (d.pickNum >= d.order.length) {
-      const teams = local.players.map((p) => {
-        const chem = MODEL.chemistry(p.squad, p.formationKey);
-        return { id: p.pid, name: p.name, players: p.squad, bonus: chem.bonus, chem: chem.teamChem };
-      });
-      local.tournament = ENGINE.runTournament(teams);
-      // Diffusion : chaque journée se joue en direct, bouton pour enchaîner.
+      const teams = local.players.map((p) => ({ id: p.pid, name: p.name, players: p.squad, formationKey: p.formationKey }));
+      // Tournoi progressif : forme, rotation et suspensions comptent.
+      local.tstate = ENGINE.createTournament(teams);
       local.phase = "playing";
-      local.reveal = { roundIdx: 0, rounds: ENGINE.buildRounds(local.tournament) };
+      local.reveal = { idx: 0, current: ENGINE.playNextRound(local.tstate) };
       local.roundStartedAt = Date.now();
     } else {
       localPrepareTurn();
@@ -252,14 +254,19 @@
       }
     }
     else if (type === "nextMatch") {
-      if (local.phase === "playing" && local.reveal) {
-        local.reveal.roundIdx++;
-        local.roundStartedAt = Date.now();
-        if (local.reveal.roundIdx >= local.reveal.rounds.length) local.phase = "results";
+      if (local.phase === "playing" && local.reveal && local.reveal.current) {
+        ENGINE.settleRound(local.tstate, local.reveal.current);
+        if (local.tstate.done) { local.tournament = ENGINE.finalizeTournament(local.tstate); local.phase = "results"; }
+        else {
+          local.reveal.current = ENGINE.playNextRound(local.tstate);
+          local.reveal.idx++;
+          local.roundStartedAt = Date.now();
+          if (!local.reveal.current) { local.tournament = ENGINE.finalizeTournament(local.tstate); local.phase = "results"; }
+        }
         localRender();
       }
     }
-    else if (type === "playAgain" || type === "resetGame") { local.phase = "lobby"; local.draft = null; local.tournament = null; local.reveal = null; local.players.forEach((p) => { p.squad = []; p.spent = 0; }); localRender(); }
+    else if (type === "playAgain" || type === "resetGame") { local.phase = "lobby"; local.draft = null; local.tournament = null; local.tstate = null; local.reveal = null; local.players.forEach((p) => { p.squad = []; p.spent = 0; }); localRender(); }
     else if (type === "setFormation") { const p = local.players.find((x) => x.pid === state.pid); if (p && MODEL.FORMATIONS[extra.formationKey]) { p.formationKey = extra.formationKey; localRender(); } }
     return Promise.resolve({ ok: true });
   }
@@ -336,6 +343,10 @@
   $("btn-start").addEventListener("click", () => api("startGame"));
   $("btn-again").addEventListener("click", () => api("playAgain"));
   $("btn-next-match").addEventListener("click", () => api("nextMatch"));
+  document.querySelectorAll(".instr-btn").forEach((b) => b.addEventListener("click", async () => {
+    const r = await api("setInstruction", { stance: b.dataset.st });
+    if (r && r.ok) { SND.ding(); vibe(80); }
+  }));
   $("btn-skip").addEventListener("click", () => api("skipReveal"));
 
   // Relancer l'équipe tirée au sort (2 max).
@@ -506,7 +517,8 @@
     // jour que les chiffres/fils, pas de reconstruction -> pas de clignotement.
     const roundKey = s.code + "|" + p.stage + "|" + p.round;
     if (state.liveRoundKey !== roundKey) { state.watchKey = null; if (mine || isLocal) featured = mine || p.matches[0]; }
-    const simKey = roundKey + "|" + (featured ? featured.a + ":" + featured.b : "-");
+    const evSig = featured ? (featured.events || []).length + ":" + featured.ga + "-" + featured.gb + ":" + (featured.stanceA || "") + (featured.stanceB || "") : "-";
+    const simKey = roundKey + "|" + (featured ? featured.a + ":" + featured.b : "-") + "|" + evSig;
     if (state.liveSimKey !== simKey) {
       state.liveRoundKey = roundKey;
       state.liveSimKey = simKey;
@@ -747,7 +759,9 @@
     }));
     const dots = mk(A, "a").concat(mk(B, "b"));
     dots.forEach((d, i) => { d.idx = i; });
-    const events = (match.events || []).slice().sort((x, y) => x.m - y.m).map((ev) => ({
+    const events = (match.events || [])
+      .filter((ev) => ev.type === "goal" || ev.type === "saved" || ev.type === "off" || ev.type === "post")
+      .slice().sort((x, y) => x.m - y.m).map((ev) => ({
       m: ev.m, type: ev.type, side: ev.side,
       x: clampV(ev.x, 4, 96), y: clampV(ev.y * 0.64, 6, 58),
       shooter: dots.find((d) => d.side === ev.side && d.name === ev.scorer) || null,
@@ -874,6 +888,7 @@
     const evs = events || [];
     const goals = {}, saves = {}, tries = {};
     evs.forEach((e) => {
+      if (e.type === "yellow" || e.type === "red") return;
       if (e.type === "goal") goals[e.scorer] = (goals[e.scorer] || 0) + 1;
       if (e.type === "saved") saves[e.gkName] = (saves[e.gkName] || 0) + 1;
       tries[e.scorer] = (tries[e.scorer] || 0) + 1;
@@ -929,7 +944,10 @@
       const seen = (featured.events || []).filter((e) => e.m <= mc.minute);
       if (seen.length > (state.snd.seen || 0)) {
         const newest = seen[seen.length - 1];
-        if (newest && newest.type !== "goal") SND.ooh();
+        if (newest && newest.type !== "goal") {
+          if (newest.type === "yellow" || newest.type === "red") SND.whistle(1);
+          else SND.ooh();
+        }
         state.snd.seen = seen.length;
       }
       // Célébration : l'horloge est figée sur le but -> grande animation.
@@ -956,10 +974,29 @@
       setHtml($("live-feed"),
         lines.map((l) => `<div class="evline ${l.cls}"><span class="min">${l.m}'</span><span class="etxt">${esc(l.text)}</span></div>`).join("")
         || `<div class="evline"><span class="min">1'</span><span class="etxt">🟢 Coup d'envoi !</span></div>`);
+
+      // Instructions tactiques : uniquement sur MON match, avant la 85e.
+      const isMyMatch = featured.a === state.pid || featured.b === state.pid;
+      const uses = (featured.instr && featured.instr[state.pid]) || 0;
+      const showInstr = isMyMatch && !isLocal && !mc.ft && mc.minute < 85;
+      $("instr-row").style.display = showInstr ? "" : "none";
+      $("instr-hint").style.display = showInstr ? "" : "none";
+      if (showInstr) {
+        const myStance = featured.a === state.pid ? featured.stanceA : featured.stanceB;
+        document.querySelectorAll(".instr-btn").forEach((b) => {
+          b.classList.toggle("on", b.dataset.st === (myStance || "bal"));
+          b.disabled = uses >= 3;
+        });
+        setText($("instr-hint"), uses >= 3
+          ? "Plus de changement tactique disponible (3 max)."
+          : `Consigne pour ton équipe · ${3 - uses} changement${3 - uses > 1 ? "s" : ""} restant${3 - uses > 1 ? "s" : ""}`);
+      }
     } else {
       const raw = Math.max(0, Math.min(90, Math.floor((elapsed / p.clockMs) * 90)));
       setText($("live-min"), ftAll ? "TERMINÉ" : raw + "'");
       $("live-min").classList.toggle("ft", ftAll);
+      $("instr-row").style.display = "none";
+      $("instr-hint").style.display = "none";
     }
 
     const others = p.matches.filter((m) => m !== featured);
@@ -1107,7 +1144,9 @@
         </div>
         <div>
           <div class="ms-label">Tes postes à pourvoir</div>
-          <div class="ms-chips">${needChips || '<span class="ms-chip done">✓ Effectif complet</span>'}</div>
+          <div class="ms-chips">${needChips || (m0.squad.length < 13
+            ? `<span class="ms-chip">🪑 Banc <b>${Math.max(0, m0.squad.length - 11)}/2</b> — poste libre</span>`
+            : '<span class="ms-chip done">✓ Effectif complet</span>')}</div>
         </div>
       </div>`;
     }
@@ -1206,7 +1245,14 @@
         <svg class="chem" viewBox="0 0 100 150" preserveAspectRatio="none">${linksSvg}</svg>
         ${tokens}
       </div>
-      <p class="hint">Astuce alchimie : aligne des joueurs de même nationalité à des postes proches pour un bonus d'équipe.</p>`;
+      ${(() => {
+        const placed = new Set(chem.placement.filter((x) => x.player).map((x) => x.player));
+        const bench = pl.squad.filter((x) => !placed.has(x));
+        if (!bench.length) return "";
+        return `<div class="bench-row">🪑 Banc : ${bench.map((b) =>
+          `${flag(b.code)} ${esc(b.n)}${b.susp ? ' <span class="fat-tag">🟥 susp.</span>' : (b.fat >= 2 ? ` <span class="fat-tag">😓 −${Math.min(6, (b.fat - 1) * 2)}</span>` : "")}`).join(" · ")}</div>`;
+      })()}
+      <p class="hint">Alchimie : même pays ou même club à des postes proches. Les joueurs qui enchaînent perdent de la forme — le banc fait tourner.</p>`;
   }
 
   // ---------- Résultats ----------
@@ -1291,7 +1337,7 @@
           <span class="sovr">${p.strength.overall}</span>
         </div>
         <div class="squad-players">${sorted.map((pl) => `<div class="sp" data-id="${pl.id}"><span class="spos">${pl.pos}</span>
-          <span class="spn">${flag(pl.code)} ${esc(pl.n)}</span><span class="spr">${pl.r}</span></div>`).join("")}
+          <span class="spn">${flag(pl.code)} ${esc(pl.n)}${pl.susp ? " 🟥" : pl.fat >= 2 ? " 😓" : ""}</span><span class="spr">${pl.r}</span></div>`).join("")}
           ${!sorted.length ? '<p class="hint">Aucun joueur drafté pour l\'instant.</p>' : ""}</div>
       </div>`;
     }).join("");
@@ -1317,7 +1363,7 @@
 
   // Terrain FM horizontal avec la carte des actions (feuille de match).
   function fmPitchHtml(events, minuteLimit) {
-    const dots = (events || []).filter((e) => e.m <= minuteLimit).map((ev) =>
+    const dots = (events || []).filter((e) => e.m <= minuteLimit && e.type !== "yellow" && e.type !== "red").map((ev) =>
       `<circle class="fm-dot" cx="${ev.x}" cy="${ev.y * 0.64}" r="${ev.type === "goal" ? 3 : 2.1}" fill="${EV_COLOR[ev.type]}"/>`).join("");
     return `<div class="fm-pitch"><svg viewBox="0 0 100 64" preserveAspectRatio="none">${fmLinesSvg()}${dots}</svg></div>`;
   }
@@ -1327,7 +1373,7 @@
     const legend = Object.keys(EV_LABEL).map((k) => `<span><i style="background:${EV_COLOR[k]}"></i>${EV_LABEL[k]}</span>`).join("");
     // Stats du match : tirs / cadrés / possession estimée
     const st = { a: { sh: 0, on: 0 }, b: { sh: 0, on: 0 } };
-    evs.forEach((e) => { const t = st[e.side]; if (!t) return; t.sh++; if (e.type === "goal" || e.type === "saved") t.on++; });
+    evs.forEach((e) => { if (e.type === "yellow" || e.type === "red") return; const t = st[e.side]; if (!t) return; t.sh++; if (e.type === "goal" || e.type === "saved") t.on++; });
     const possA = Math.max(32, Math.min(68, 50 + (st.a.sh - st.b.sh) * 4));
     const statsHtml = `<div class="ms-stats">
       <span>${st.a.sh} tirs (${st.a.on} cadrés)</span>

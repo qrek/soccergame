@@ -18,7 +18,8 @@ const PLAYERS = RAW_PLAYERS.map((p, i) => ({ id: i, ...p }));
 
 const PORT = process.env.PORT || 3000;
 const TURN_SECONDS = 13;
-const SQUAD_SIZE = 11; // toutes les équipes ont 11 joueurs
+const SQUAD_SIZE = 11;   // onze de départ
+const DRAFT_PICKS = 13;  // 11 titulaires + 2 remplaçants (rotation/forme)
 const MATCH_MS = parseInt(process.env.MATCH_MS, 10) || 44000;      // durée du direct d'une journée (0' -> 90')
 const PAUSE_MS = parseInt(process.env.PAUSE_MS, 10) || 7000;       // pause score final avant la journée suivante
 const GOAL_HOLD_MS = parseInt(process.env.GOAL_HOLD_MS, 10) || 3500; // l'horloge se fige sur chaque but (célébration)
@@ -84,7 +85,11 @@ function draftedIds(room) {
 // ---------------------------------------------------------------------------
 function snapshot(room) {
   const players = room.players.map((p) => {
-    const sp = squadPlayers(room, p);
+    const t0 = room.tstate;
+    const sp = squadPlayers(room, p).map((pl) => Object.assign({}, pl, {
+      fat: t0 ? (t0.fatigue[pl.id] || 0) : 0,
+      susp: t0 ? (t0.suspended[pl.id] || 0) > 0 : false,
+    }));
     const chem = MODEL.chemistry(sp, p.formationKey);
     return {
       pid: p.pid,
@@ -96,7 +101,7 @@ function snapshot(room) {
       kit: p.kit,
       squad: sp,
       squadCount: sp.length,
-      strength: engine.teamStrength(sp),
+      strength: engine.teamStrength(MODEL.placeInSlots(sp, p.formationKey).filter((x) => x.player).map((x) => x.player)),
       chem: chem.teamChem,
       chemBonus: chem.bonus,
     };
@@ -129,22 +134,21 @@ function snapshot(room) {
     };
   }
 
-  if (room.phase === "playing" && room.reveal) {
-    const { roundIdx, rounds, startedAt } = room.reveal;
-    const cur = rounds[Math.min(roundIdx, rounds.length - 1)];
+  if (room.phase === "playing" && room.reveal && room.reveal.current) {
+    const cur = room.reveal.current;
     snap.playing = {
-      round: roundIdx + 1,
-      totalRounds: rounds.length,
+      round: room.reveal.idx,
+      totalRounds: room.tstate.totalRounds,
       stage: cur.stage,
       type: cur.type,
-      matches: cur.matches,
-      startedAt,
+      matches: cur.matches.map(engine.publicMatch),
+      startedAt: room.reveal.startedAt,
       clockMs: MATCH_MS,
       goalHoldMs: GOAL_HOLD_MS,
-      // matchs de championnat déjà terminés (pour le classement live)
-      playedMatches: rounds.slice(0, roundIdx)
-        .filter((r) => r.type === "league")
-        .flatMap((r) => r.matches.map((m) => ({ a: m.a, b: m.b, ga: m.ga, gb: m.gb }))),
+      // matchs de championnat des journées PRÉCÉDENTES (classement live)
+      playedMatches: room.tstate.playedLeague
+        .filter((m) => cur.matches.indexOf(m) < 0)
+        .map((m) => ({ a: m.a, b: m.b, ga: m.ga, gb: m.gb })),
     };
   }
 
@@ -181,7 +185,7 @@ function startDraft(room) {
     [pids[i], pids[j]] = [pids[j], pids[i]];
   }
   const order = [];
-  for (let r = 0; r < SQUAD_SIZE; r++) {
+  for (let r = 0; r < DRAFT_PICKS; r++) {
     order.push(...(r % 2 === 0 ? pids : pids.slice().reverse()));
   }
   room.draft = { order, pickNum: 0, currentPid: order[0], currentTeam: null, deadline: 0 };
@@ -195,7 +199,7 @@ function prepareTurn(room) {
   const drafted = draftedIds(room);
   const need = neededPositions(room, drafter);
   // Réserve : garder de quoi payer les postes restants (~2 M€ chacun).
-  const budget = { left: MODEL.BUDGET - drafter.spent, needCounts: need };
+  const budget = { left: MODEL.BUDGET - drafter.spent, needCounts: need, slotsLeft: DRAFT_PICKS - drafter.squad.length };
   d.currentTeam = engine.drawTeamForTurn(PLAYERS, drafted, new Set(Object.keys(need)), budget);
   d.deadline = Date.now() + TURN_SECONDS * 1000;
   scheduleAutoPick(room);
@@ -244,27 +248,30 @@ function applyPick(room, pid, playerId, auto) {
 // ---------------------------------------------------------------------------
 function finishDraft(room) {
   clearTimeout(room.turnTimer);
-  const teams = room.players.map((p) => {
-    const sp = squadPlayers(room, p);
-    const chem = MODEL.chemistry(sp, p.formationKey);
-    return { id: p.pid, name: p.teamName || p.name, players: sp, bonus: chem.bonus, chem: chem.teamChem };
-  });
-  room.fullTournament = engine.runTournament(teams);
-  // Diffusion en direct : chaque journée se joue en simultané (0' -> 90'),
-  // on n'avance que quand tous les matchs de la journée sont terminés.
+  const teams = room.players.map((p) => ({
+    id: p.pid, name: p.teamName || p.name,
+    players: squadPlayers(room, p),
+    formationKey: p.formationKey,
+  }));
+  // Simulation PROGRESSIVE : chaque journée est jouée à son coup d'envoi
+  // (forme, rotation, suspensions et instructions du match en dépendent).
+  room.tstate = engine.createTournament(teams);
   room.phase = "playing";
-  room.reveal = { roundIdx: 0, rounds: engine.buildRounds(room.fullTournament), startedAt: 0 };
+  room.reveal = { idx: 0, current: null, startedAt: 0 };
   startRound(room);
 }
 
 function startRound(room) {
-  room.reveal.startedAt = Date.now();
   clearTimeout(room.revealTimer);
-  const cur = room.reveal.rounds[room.reveal.roundIdx];
-  const maxGoals = Math.max(0, ...cur.matches.map((m) => (m.events || []).filter((e) => e.type === "goal").length));
+  const round = engine.playNextRound(room.tstate);
+  if (!round) return finishReveal(room);
+  room.reveal.current = round;
+  room.reveal.idx++;
+  room.reveal.startedAt = Date.now();
+  const maxGoals = Math.max(0, ...round.matches.map((m) => (m.events || []).filter((e) => e.type === "goal").length));
   room.revealTimer = setTimeout(() => {
-    room.reveal.roundIdx++;
-    if (room.reveal.roundIdx >= room.reveal.rounds.length) finishReveal(room);
+    engine.settleRound(room.tstate, round);
+    if (room.tstate.done) finishReveal(room);
     else startRound(room);
   }, MATCH_MS + maxGoals * GOAL_HOLD_MS + PAUSE_MS);
   broadcast(room);
@@ -272,8 +279,14 @@ function startRound(room) {
 
 function finishReveal(room) {
   clearTimeout(room.revealTimer);
+  // au cas où on saute la diffusion : terminer le tournoi d'un coup
+  if (room.tstate && !room.tstate.done) {
+    if (room.reveal && room.reveal.current) engine.settleRound(room.tstate, room.reveal.current);
+    let r;
+    while (!room.tstate.done && (r = engine.playNextRound(room.tstate))) engine.settleRound(room.tstate, r);
+  }
   room.phase = "results";
-  room.tournament = room.fullTournament;
+  room.tournament = engine.finalizeTournament(room.tstate);
   broadcast(room);
 }
 
@@ -284,7 +297,7 @@ function resetRoom(room) {
   room.phase = "lobby";
   room.draft = null;
   room.tournament = null;
-  room.fullTournament = null;
+  room.tstate = null;
   room.reveal = null;
   room.players.forEach((pl) => { pl.squad = []; pl.spent = 0; });
   broadcast(room);
@@ -393,6 +406,32 @@ const ACTIONS = {
     drafter.rerolls--;
     prepareTurn(room);
     return { ok: true };
+  },
+  // Instruction tactique pendant SON match (max 3 par match, impact <= 6 %).
+  setInstruction(msg) {
+    const room = rooms.get(msg.code);
+    if (!room || room.phase !== "playing" || !room.reveal || !room.reveal.current) return { ok: false };
+    const stance = ["off", "bal", "def"].indexOf(msg.stance) >= 0 ? msg.stance : "bal";
+    const m = room.reveal.current.matches.find((x) => x.a === msg.pid || x.b === msg.pid);
+    if (!m) return { ok: false, error: "Pas de match en cours." };
+    const uses = (m.instr && m.instr[msg.pid]) || 0;
+    if (uses >= 3) return { ok: false, error: "Plus d'instruction disponible (3 max)." };
+    // minute courante (horloge + pauses célébration)
+    const elapsed = Date.now() - room.reveal.startedAt;
+    const goals = (m.events || []).filter((e) => e.type === "goal").sort((x, y) => x.m - y.m);
+    let holds = 0, minute = null;
+    for (const g of goals) {
+      const tg = (g.m / 90) * MATCH_MS + holds;
+      if (elapsed < tg) break;
+      if (elapsed < tg + GOAL_HOLD_MS) { minute = g.m; break; }
+      holds += GOAL_HOLD_MS;
+    }
+    if (minute === null) minute = Math.min(90, Math.floor(((elapsed - holds) / MATCH_MS) * 90));
+    if (minute >= 85) return { ok: false, error: "Trop tard pour changer de tactique." };
+    m.instr[msg.pid] = uses + 1;
+    engine.applyInstruction(m, m.a === msg.pid ? "a" : "b", stance, minute);
+    broadcast(room);
+    return { ok: true, stance };
   },
   // Quitter la session depuis le salon (l'hôte est transféré si besoin).
   leaveRoom(msg) {

@@ -186,7 +186,7 @@
   // Valeur marchande (en M€), dérivée de la note et du poste : courbe
   // exponentielle façon marché réel (les attaquants coûtent plus cher).
   // ------------------------------------------------------------------
-  const BUDGET = 350; // budget global par manager, en M€
+  const BUDGET = 380; // budget global par manager, en M€ (13 joueurs : 11 + 2 banc)
   const POS_VALUE = { FWD: 1.15, MID: 1.0, DEF: 0.9, GK: 0.8 };
   function marketValue(p) {
     let v = 5 * Math.pow(1.163, p.r - 75) * (POS_VALUE[p.pos] || 1);

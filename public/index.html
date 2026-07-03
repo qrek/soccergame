@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#04121f" />
   <title>Football Draft — Ultimate National Teams</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
-  <link rel="stylesheet" href="css/styles.css?v=11" />
+  <link rel="stylesheet" href="css/styles.css?v=12" />
 </head>
 <body>
   <div id="app">
@@ -42,6 +42,7 @@
           <div id="qr-holder"></div>
           <div class="qr-code">Code : <b id="lobby-code-big">----</b></div>
           <div class="qr-note">Scanne le QR ou saisis le code pour rejoindre</div>
+          <button class="btn btn-ghost btn-wide" id="btn-share" style="margin-top:10px">🔗 Partager le lien d'invitation</button>
         </div>
 
         <!-- Mode 1 téléphone : ajout des joueurs locaux -->
@@ -91,9 +92,10 @@
       <header class="topbar">
         <span class="brand">DRAFT</span>
         <span class="draft-progress"><b id="draft-pick">0</b>/<span id="draft-total">0</span></span>
-        <span class="timer" id="draft-timer">45</span>
+        <span class="timer" id="draft-timer">25</span>
       </header>
 
+      <div class="draft-order" id="draft-order"></div>
       <div class="turn-banner" id="turn-banner"><span id="turn-text">…</span></div>
 
       <div class="draft-team" id="draft-team">
@@ -105,11 +107,14 @@
       <div class="need-bar" id="need-bar"></div>
       <div class="join-row draft-tools">
         <button class="btn btn-ghost btn-wide" id="btn-reroll" style="display:none">🎲 Relancer l'équipe (2)</button>
-        <button class="btn btn-ghost btn-wide" id="btn-compo">👥 Ma compo</button>
       </div>
       <div class="cards-grid" id="cards-grid"></div>
       <div class="my-squad-mini" id="my-squad-mini"></div>
       <button class="btn btn-ghost btn-wide btn-danger" id="btn-reset-draft">🔄 Réinitialiser la partie</button>
+      <div class="dock">
+        <button class="dock-btn js-compo">👥 Ma compo</button>
+        <button class="dock-btn js-squads">📋 Compos</button>
+      </div>
     </section>
 
     <!-- ================= DIFFUSION DES MATCHS ================= -->
@@ -123,11 +128,14 @@
         <div id="live-stage"></div>
         <div id="live-summary"></div>
         <button class="btn btn-primary" id="btn-next-match" style="display:none">Match suivant ▶</button>
-        <button class="btn btn-ghost btn-wide" id="btn-compo2">👥 Ma compo</button>
         <button class="btn btn-ghost btn-wide" id="btn-skip" style="display:none">Passer la diffusion ⏭</button>
         <button class="btn btn-ghost btn-wide btn-danger" id="btn-reset-playing">🔄 Réinitialiser la partie</button>
         <div class="round-title" id="live-prev-title" style="display:none">Déjà joués</div>
         <div id="live-prev"></div>
+      </div>
+      <div class="dock">
+        <button class="dock-btn js-compo">👥 Ma compo</button>
+        <button class="dock-btn js-squads">📋 Compos</button>
       </div>
     </section>
 
@@ -161,16 +169,19 @@
   <!-- Carte joueur affichée en plein écran au clic -->
   <div id="card-modal" class="modal"><div class="modal-inner" id="card-modal-inner"></div></div>
 
+  <!-- Toutes les compos -->
+  <div id="squads-modal" class="modal"><div class="match-sheet" id="squads-sheet"></div></div>
+
   <!-- Ma composition (terrain) -->
   <div id="compo-modal" class="modal"><div class="match-sheet" id="compo-sheet"></div></div>
 
   <!-- Feuille de match (temps forts + visuel façon FM) -->
   <div id="match-modal" class="modal"><div class="match-sheet" id="match-sheet"></div></div>
 
-  <script src="js/qrcode.js?v=11"></script>
-  <script src="js/model.js?v=11"></script>
-  <script src="js/engine.js?v=11"></script>
-  <script src="data/players.js?v=11"></script>
-  <script src="js/app.js?v=11"></script>
+  <script src="js/qrcode.js?v=12"></script>
+  <script src="js/model.js?v=12"></script>
+  <script src="js/engine.js?v=12"></script>
+  <script src="data/players.js?v=12"></script>
+  <script src="js/app.js?v=12"></script>
 </body>
 </html>

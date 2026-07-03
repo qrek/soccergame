@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v11 — direct amélioré";
+  const APP_VERSION = "v12 — draft revu";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -119,7 +119,7 @@
       snap.draft = { pickNum: d.pickNum + 1, totalPicks: d.order.length, currentPid: d.currentPid,
         currentName: cur.name, round: Math.floor(d.pickNum / local.players.length) + 1,
         team: d.currentTeam, needed: localNeeded(cur), deadline: 0,
-        budget: MODEL.BUDGET, budgetLeft: MODEL.BUDGET - cur.spent, rerollsLeft: cur.rerolls || 0 };
+        budget: MODEL.BUDGET, budgetLeft: MODEL.BUDGET - cur.spent, rerollsLeft: cur.rerolls || 0, order: d.order.slice(0, local.players.length) };
     }
     if (local.phase === "playing" && local.reveal) {
       const { roundIdx, rounds } = local.reveal;
@@ -148,6 +148,7 @@
   function localStart() {
     local.players.forEach((p) => { p.squad = []; p.spent = 0; p.rerolls = 2; });
     const pids = local.players.map((p) => p.pid);
+    for (let i = pids.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pids[i], pids[j]] = [pids[j], pids[i]]; }
     const order = [];
     for (let r = 0; r < 11; r++) order.push(...(r % 2 === 0 ? pids : pids.slice().reverse()));
     local.draft = { order, pickNum: 0, currentPid: order[0], currentTeam: null };
@@ -278,17 +279,45 @@
   $("btn-next-match").addEventListener("click", () => api("nextMatch"));
   $("btn-skip").addEventListener("click", () => api("skipReveal"));
 
-  // Relancer l'équipe tirée au sort (2 max) + voir sa composition.
+  // Relancer l'équipe tirée au sort (2 max).
   $("btn-reroll").addEventListener("click", () => api("rerollTeam"));
+
+  // Dock bas : ma compo (terrain) + toutes les compos.
   function openCompo() {
     const m = me();
     if (!m) return;
     $("compo-sheet").innerHTML = renderPitch(m);
     $("compo-modal").classList.add("on");
   }
-  $("btn-compo").addEventListener("click", openCompo);
-  $("btn-compo2").addEventListener("click", openCompo);
+  function openSquads() {
+    if (!state.snap) return;
+    $("squads-sheet").innerHTML = `<div class="round-title" style="margin-top:0">Toutes les compos</div>` + squadsHtml(state.snap.players);
+    $("squads-modal").classList.add("on");
+  }
+  document.querySelectorAll(".js-compo").forEach((b) => b.addEventListener("click", openCompo));
+  document.querySelectorAll(".js-squads").forEach((b) => b.addEventListener("click", openSquads));
   $("compo-modal").addEventListener("click", (e) => { if (e.target.id === "compo-modal") $("compo-modal").classList.remove("on"); });
+  $("squads-modal").addEventListener("click", (e) => { if (e.target.id === "squads-modal") $("squads-modal").classList.remove("on"); });
+
+  // Lien d'invitation : partage natif du téléphone, sinon copie.
+  $("btn-share").addEventListener("click", async () => {
+    if (!state.snap) return;
+    const url = location.origin + location.pathname.replace(/[^/]*$/, "") + "?room=" + state.snap.code;
+    const btn = $("btn-share");
+    if (navigator.share) {
+      try { await navigator.share({ title: "Football Draft", text: "Rejoins ma session Football Draft ⚽", url }); return; } catch (_) {}
+    }
+    try { await navigator.clipboard.writeText(url); btn.textContent = "✓ Lien copié !"; }
+    catch (_) { prompt("Copie ce lien :", url); }
+    setTimeout(() => { btn.textContent = "🔗 Partager le lien d'invitation"; }, 2500);
+  });
+
+  // Au retour au premier plan (téléphone déverrouillé), rétablir le flux.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && state.code && state.pid && !local.active) {
+      if (!state.es || state.es.readyState === 2) connect();
+    }
+  });
 
   // Réinitialisation d'urgence (confirmée) — accessible à tous les joueurs.
   const confirmReset = () => { if (confirm("Réinitialiser la partie pour tout le monde et revenir au salon ?")) api("resetGame"); };
@@ -692,15 +721,30 @@
     $("team-flag").textContent = flag(d.team.code);
     $("draft-team-name").textContent = d.team.country;
 
-    const budgetChip = d.budget != null
-      ? `<span class="need-chip budget-chip">💰 <b>${fmtM(Math.round(d.budgetLeft * 10) / 10)}</b> / ${fmtM(d.budget)}</span>` : "";
-    // Alchimie en direct : la sienne + les pays de son effectif pour repérer les liens.
+    // Ordre de passage (tiré au sort au début) : les équipes en haut,
+    // celle qui picke est surlignée.
+    setHtml($("draft-order"), (d.order || []).map((pid) => {
+      const pl = s.players.find((x) => x.pid === pid);
+      return `<span class="order-chip ${pid === d.currentPid ? "on" : ""}">${esc(pl ? pl.teamName : "?")}</span>`;
+    }).join('<span class="order-sep">›</span>'));
+
+    // Budget, alchimie et postes restants : TOUJOURS les siens.
     const m0 = me();
-    const chemChip = m0
-      ? `<span class="need-chip chem-chip">🔗 Alchimie <b>${MODEL.chemistry(m0.squad, m0.formationKey).teamChem}</b></span>` : "";
-    $("need-bar").innerHTML = budgetChip + chemChip
-      + (Object.entries(d.needed).map(([pos, n]) => `<span class="need-chip">${pos} <b>×${n}</b></span>`).join("")
-      || '<span class="need-chip">Effectif complet</span>');
+    let myChips = "";
+    if (m0) {
+      const spent = (m0.squad || []).reduce((t, p) => t + MODEL.marketValue(p), 0);
+      const left = Math.max(0, Math.round((MODEL.BUDGET - spent) * 10) / 10);
+      const counts = MODEL.positionCounts(m0.formationKey);
+      const have = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+      m0.squad.forEach((p) => have[p.pos]++);
+      const needChips = ["GK", "DEF", "MID", "FWD"]
+        .filter((pos) => counts[pos] - have[pos] > 0)
+        .map((pos) => `<span class="need-chip">${pos} <b>×${counts[pos] - have[pos]}</b></span>`).join("");
+      myChips = `<span class="need-chip budget-chip">💰 <b>${fmtM(left)}</b> / ${fmtM(MODEL.BUDGET)}</span>`
+        + `<span class="need-chip chem-chip">🔗 Alchimie <b>${MODEL.chemistry(m0.squad, m0.formationKey).teamChem}</b></span>`
+        + (needChips || '<span class="need-chip">Effectif complet ✓</span>');
+    }
+    $("need-bar").innerHTML = myChips;
 
     // Relance d'équipe : visible seulement à son tour, avec le compteur.
     const rerollBtn = $("btn-reroll");
@@ -855,7 +899,17 @@
           <span class="score">${mm.ga}-${mm.gb}</span>
           <span class="side" style="justify-content:flex-end"><span>${esc(mm.bn)}</span></span></div>`; }).join("")}`;
 
-    $("tab-squads").innerHTML = s.players.map((p) => {
+    $("tab-squads").innerHTML = squadsHtml(s.players);
+
+    $("btn-again").style.display = isHost() ? "" : "none";
+    // Sans l'hôte, chacun peut quand même relancer via la réinitialisation.
+    $("btn-reset-results").style.display = isHost() ? "none" : "";
+  }
+  const ord = (pos) => ({ GK: 0, DEF: 1, MID: 2, FWD: 3 }[pos] ?? 4);
+
+  // Blocs "effectif" : réutilisés par l'onglet Équipes et le modal Compos.
+  function squadsHtml(players) {
+    return players.map((p) => {
       const sorted = p.squad.slice().sort((a, b) => ord(a.pos) - ord(b.pos) || b.r - a.r);
       return `<div class="squad-block">
         <div class="squad-head">
@@ -864,15 +918,11 @@
           <span class="sovr">${p.strength.overall}</span>
         </div>
         <div class="squad-players">${sorted.map((pl) => `<div class="sp" data-id="${pl.id}"><span class="spos">${pl.pos}</span>
-          <span class="spn">${flag(pl.code)} ${esc(pl.n)}</span><span class="spr">${pl.r}</span></div>`).join("")}</div>
+          <span class="spn">${flag(pl.code)} ${esc(pl.n)}</span><span class="spr">${pl.r}</span></div>`).join("")}
+          ${!sorted.length ? '<p class="hint">Aucun joueur drafté pour l\'instant.</p>' : ""}</div>
       </div>`;
     }).join("");
-
-    $("btn-again").style.display = isHost() ? "" : "none";
-    // Sans l'hôte, chacun peut quand même relancer via la réinitialisation.
-    $("btn-reset-results").style.display = isHost() ? "none" : "";
   }
-  const ord = (pos) => ({ GK: 0, DEF: 1, MID: 2, FWD: 3 }[pos] ?? 4);
 
   // ---------- Modal carte (clic sur un joueur en vue résultats) ----------
   function openCardModal(player) {
@@ -961,7 +1011,9 @@
         // En démo, rejoue le direct depuis le coup d'envoi.
         if (d.snap.playing) { d.snap.playing.startedAt = Date.now(); d.snap.playing.clockMs = parseInt(params.get("clock"), 10) || 52000; d.snap.playing.goalHoldMs = parseInt(params.get("hold"), 10) || d.snap.playing.goalHoldMs || 3500; }
         render();
-        if (params.get("open") && state.matchMap && state.matchMap.size) matchModal(state.matchMap.values().next().value);
+        if (params.get("open") === "compo") openCompo();
+        else if (params.get("open") === "squads") openSquads();
+        else if (params.get("open") && state.matchMap && state.matchMap.size) matchModal(state.matchMap.values().next().value);
         const tb = params.get("tab");
         if (tb) { const el = document.querySelector(`.tab[data-tab="${tb}"]`); if (el) el.click(); }
       });

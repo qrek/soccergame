@@ -17,7 +17,7 @@ const RAW_PLAYERS = require("./public/data/players.js");
 const PLAYERS = RAW_PLAYERS.map((p, i) => ({ id: i, ...p }));
 
 const PORT = process.env.PORT || 3000;
-const TURN_SECONDS = 45;
+const TURN_SECONDS = 25;
 const SQUAD_SIZE = 11; // toutes les équipes ont 11 joueurs
 const MATCH_MS = parseInt(process.env.MATCH_MS, 10) || 52000;      // durée du direct d'une journée (0' -> 90')
 const PAUSE_MS = parseInt(process.env.PAUSE_MS, 10) || 7000;       // pause score final avant la journée suivante
@@ -125,6 +125,7 @@ function snapshot(room) {
       budget: MODEL.BUDGET,
       budgetLeft: drafter ? MODEL.BUDGET - drafter.spent : 0,
       rerollsLeft: drafter ? (drafter.rerolls || 0) : 0,
+      order: d.order.slice(0, room.players.length),
     };
   }
 
@@ -169,7 +170,12 @@ function broadcastPick(room, payload) {
 function startDraft(room) {
   room.phase = "draft";
   room.players.forEach((p) => { p.squad = []; p.spent = 0; p.rerolls = REROLLS; });
+  // Tirage au sort de l'ordre de passage (serpentin ensuite).
   const pids = room.players.map((p) => p.pid);
+  for (let i = pids.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pids[i], pids[j]] = [pids[j], pids[i]];
+  }
   const order = [];
   for (let r = 0; r < SQUAD_SIZE; r++) {
     order.push(...(r % 2 === 0 ? pids : pids.slice().reverse()));
@@ -194,9 +200,9 @@ function prepareTurn(room) {
 
 function scheduleAutoPick(room) {
   clearTimeout(room.turnTimer);
-  const drafter = playerByPid(room, room.draft.currentPid);
-  const delay = drafter && drafter.connected ? TURN_SECONDS * 1000 : 1500;
-  room.turnTimer = setTimeout(() => autoPick(room), delay);
+  // Toujours le chrono complet : une connexion coupée (écran verrouillé,
+  // changement d'app) ne doit JAMAIS voler le pick d'un joueur.
+  room.turnTimer = setTimeout(() => autoPick(room), TURN_SECONDS * 1000);
 }
 
 function autoPick(room) {

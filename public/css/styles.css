@@ -439,3 +439,43 @@ body {
 .bench-row { background: var(--panel); border: 1px solid var(--panel-b); border-radius: 12px;
   padding: 10px 14px; font-size: 13px; margin-top: 10px; line-height: 1.6; }
 .fat-tag { color: #ff9f43; font-size: 11px; font-weight: 800; }
+
+/* ---------- v28 : enchères, tirs au but interactifs, palmarès ---------- */
+.formation-picker.two { grid-template-columns: repeat(2, 1fr); }
+
+.auction-card { background: var(--panel); border: 1px solid var(--panel-b); border-radius: 18px;
+  padding: 14px; text-align: center; display: grid; gap: 10px; justify-items: center; margin-top: 10px; }
+.auction-title { font-size: 12px; font-weight: 900; letter-spacing: 2px; color: var(--gold-a); }
+.auction-fut { display: grid; place-items: center; }
+.auction-fut .fut { width: min(56vw, 220px); cursor: default; }
+.auction-price { font-size: 17px; font-weight: 900; color: var(--text); }
+.auction-price b { color: #ff9f43; }
+.auction-price b.me { color: var(--accent); }
+.auction-card .btn { width: 100%; }
+
+.pen-panel { background: rgba(0, 0, 0, .55); border: 1px solid var(--gold-a); border-radius: 16px;
+  padding: 12px 14px; margin: 10px 0; display: grid; gap: 8px; animation: pen-in .35s ease; }
+@keyframes pen-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.pen-title { text-align: center; font-size: 12px; font-weight: 900; letter-spacing: 2.5px; color: var(--gold-a); }
+.pen-score { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 800; font-size: 13.5px; }
+.pen-score b { font-size: 22px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.pen-score span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pen-score span:last-child { text-align: right; }
+.pen-rows { display: grid; gap: 3px; font-size: 15px; letter-spacing: 3px; text-align: center; }
+.pen-now { text-align: center; font-weight: 800; font-size: 14px; min-height: 20px; }
+.pen-now.ok { color: var(--accent); }
+.pen-now.ko { color: #ff6b6b; }
+.pen-timer { color: #ff9f43; font-variant-numeric: tabular-nums; }
+.pen-q { text-align: center; font-size: 13px; font-weight: 800; color: var(--muted); }
+.pen-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pen-btns button { padding: 13px 4px; border-radius: 12px; border: 1px solid var(--panel-b);
+  background: var(--panel); color: var(--text); font-weight: 800; font-size: 13.5px; cursor: pointer; }
+.pen-btns button:active { transform: scale(.93); border-color: var(--accent); }
+
+.pal-row { display: flex; justify-content: space-between; gap: 8px; padding: 7px 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, .06); font-size: 13.5px; font-weight: 700; }
+.pal-row:last-child { border-bottom: 0; }
+.pal-row span:last-child { color: var(--gold-a); white-space: nowrap; }
+
+.ms-h2h { text-align: center; font-size: 12px; color: var(--muted); font-weight: 700; margin: 2px 0 6px; }
+.taker-btn { padding: 6px 12px; font-size: 12.5px; margin-left: 8px; }

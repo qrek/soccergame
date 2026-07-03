@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v27 — rotation, forme, instructions";
+  const APP_VERSION = "v28 — enchères, TAB interactifs, prolongations";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -119,6 +119,60 @@
         <div class="fut-sub">${esc(pl.c)} · ${esc(pl.d)}${opts.chemLink ? ` · <span class="linktag">🔗 ${opts.linkLabel || "lien"}</span>` : ""}</div>
         <div class="fut-stats">${statsHtml}</div>
       </div></div>`;
+  }
+
+  // ---------- Draft aux enchères ----------
+  function renderAuction(s, d) {
+    $("draft-pick").textContent = d.pickNum;
+    $("draft-total").textContent = d.totalPicks;
+    $("draft-team").style.display = "none";
+    $("btn-reroll").style.display = "none";
+    $("cards-grid").style.display = "none";
+    $("auction-box").style.display = "";
+    startTimer(d.deadline);
+    $("draft-timer").style.display = "";
+
+    const m0 = me();
+    let panel = "";
+    if (m0) {
+      const spent = (m0.squad || []).reduce((t, p) => t + MODEL.marketValue(p), 0);
+      const left = Math.max(0, Math.round((MODEL.BUDGET - spent) * 10) / 10);
+      const counts = MODEL.positionCounts(m0.formationKey);
+      const have = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+      m0.squad.forEach((p) => have[p.pos]++);
+      const needChips = ["GK", "DEF", "MID", "FWD"].filter((pos) => counts[pos] - have[pos] > 0)
+        .map((pos) => `<span class="ms-chip">${pos} <b>×${counts[pos] - have[pos]}</b></span>`).join("");
+      panel = `<div class="my-status mine"><div>
+          <div class="ms-label">💰 Ton budget restant</div>
+          <div class="ms-value ${left < 40 ? "low" : ""}">${fmtM(left)}</div>
+          <div class="ms-bar"><i style="width:${Math.max(2, (left / MODEL.BUDGET) * 100).toFixed(0)}%"></i></div>
+        </div><div>
+          <div class="ms-label">Tes postes à pourvoir</div>
+          <div class="ms-chips">${needChips || (m0.squad.length < 13 ? `<span class="ms-chip">🪑 Banc <b>${Math.max(0, m0.squad.length - 11)}/2</b></span>` : '<span class="ms-chip done">✓ Complet</span>')}</div>
+        </div></div>`;
+    }
+    $("need-bar").innerHTML = panel;
+
+    const iAmBest = d.bestPid === state.pid;
+    setHtml($("auction-box"), `
+      <div class="auction-card">
+        <div class="auction-title">🔨 ENCHÈRE EN COURS</div>
+        <div class="auction-fut">${futCard(d.player)}</div>
+        <div class="auction-price">${fmtM(d.price)}${d.bestName ? ` — <b class="${iAmBest ? "me" : ""}">${esc(d.bestName)}</b>` : " — mise à prix"}</div>
+        <button class="btn ${iAmBest ? "btn-ghost" : "btn-primary"}" id="btn-bid" ${iAmBest ? "disabled" : ""}>
+          ${iAmBest ? "✓ Meilleure offre" : `Enchérir ${fmtM(d.nextPrice)}`}</button>
+        <p class="hint" id="auction-hint"></p>
+      </div>`);
+    const bidBtn = document.getElementById("btn-bid");
+    if (bidBtn && !bidBtn.__wired) {
+      bidBtn.__wired = true;
+      bidBtn.addEventListener("click", async () => {
+        const r = await api("bid");
+        if (r && !r.ok && r.error) { const hint = document.getElementById("auction-hint"); if (hint) hint.textContent = r.error; }
+        else { SND.ding(); }
+      });
+    }
+    show("screen-draft");
   }
 
   // ---------- Réseau ----------
@@ -317,6 +371,8 @@
     localRender();
   });
   $("local-name").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btn-local-add").click(); });
+  document.querySelectorAll("#mode-picker button").forEach((b) => b.addEventListener("click", () => api("setMode", { mode: b.dataset.mode })));
+  document.querySelectorAll("#theme-picker button").forEach((b) => b.addEventListener("click", () => api("setTheme", { theme: b.dataset.theme })));
 
   // ---------- Lobby : club / maillot / formation ----------
   $("team-name").addEventListener("input", (e) => {
@@ -343,6 +399,15 @@
   $("btn-start").addEventListener("click", () => api("startGame"));
   $("btn-again").addEventListener("click", () => api("playAgain"));
   $("btn-next-match").addEventListener("click", () => api("nextMatch"));
+  $("shootout").addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-dir]");
+    if (!b) return;
+    const role = b.parentElement.dataset.role;
+    const so = state.snap && state.snap.playing && (state.snap.playing.matches.find((m) => m.shootout && !m.shootout.done) || {}).shootout;
+    if (so) state.penPicked = so.turn + ":" + state.pid;
+    const r = await api(role === "kick" ? "penKick" : "penDive", { dir: b.dataset.dir });
+    if (r && r.ok) { SND.ding(); vibe(60); }
+  });
   document.querySelectorAll(".instr-btn").forEach((b) => b.addEventListener("click", async () => {
     const r = await api("setInstruction", { stance: b.dataset.st });
     if (r && r.ok) { SND.ding(); vibe(80); }
@@ -362,7 +427,22 @@
   function openCompo() {
     const m = me();
     if (!m) return;
-    $("compo-sheet").innerHTML = CLOSE_X + renderPitch(m);
+    let takerHtml = "";
+    if (!local.active && m.squad.length) {
+      const cands = m.squad.filter((p) => p.pos !== "GK");
+      const cur = cands.find((p) => p.id === m.penTaker) || cands.slice().sort((u, v) => v.r - u.r)[0];
+      takerHtml = cur ? `<div class="bench-row">🎯 Tireur de penalty : <b>${esc(cur.n)}</b>
+        <button class="btn btn-ghost taker-btn" id="btn-taker">Changer</button></div>` : "";
+    }
+    $("compo-sheet").innerHTML = CLOSE_X + renderPitch(m) + takerHtml;
+    const tb = document.getElementById("btn-taker");
+    if (tb) tb.addEventListener("click", () => {
+      const mm = me();
+      const cands = mm.squad.filter((p) => p.pos !== "GK").sort((u, v) => v.r - u.r);
+      const curIdx = Math.max(0, cands.findIndex((p) => p.id === mm.penTaker));
+      const next = cands[(curIdx + 1) % cands.length];
+      api("setPenTaker", { playerId: next.id }).then(() => setTimeout(openCompo, 150));
+    });
     $("compo-modal").classList.add("on");
   }
   function openSquads() {
@@ -376,7 +456,7 @@
     const elapsed = Date.now() - p.startedAt;
     const hold = p.goalHoldMs || 3500;
     const current = p.type === "league" ? p.matches.map((m) => {
-      const mc = matchClock(elapsed, goalsOf(m), p.clockMs, hold);
+      const mc = matchClock(elapsed, goalsOf(m), p.clockMs, hold, m.dur);
       const sc = scoreAt(m, mc.minute);
       return { a: m.a, b: m.b, ga: sc.ga, gb: sc.gb };
     }) : [];
@@ -486,7 +566,8 @@
 
   // Horloge d'un match : linéaire 0'->90', figée `hold` ms sur chaque but.
   // minuteF (continue) pilote la simulation ; holdT = avancement célébration.
-  function matchClock(elapsed, goals, clockMs, hold) {
+  function matchClock(elapsed, goals, clockMs, hold, dur) {
+    const D = dur || 90;
     let holds = 0;
     for (const g of goals) {
       const tg = (g.m / 90) * clockMs + holds;
@@ -494,8 +575,8 @@
       if (elapsed < tg + hold) return { minute: g.m, minuteF: g.m, holding: g, holdT: (elapsed - tg) / hold, ft: false };
       holds += hold;
     }
-    const mf = Math.max(0, Math.min(90, ((elapsed - holds) / clockMs) * 90));
-    return { minute: Math.floor(mf), minuteF: mf, holding: null, holdT: 0, ft: elapsed - holds >= clockMs };
+    const mf = Math.max(0, Math.min(D, ((elapsed - holds) / clockMs) * 90));
+    return { minute: Math.floor(mf), minuteF: mf, holding: null, holdT: 0, ft: elapsed - holds >= (clockMs * D) / 90 };
   }
   const goalsOf = (m) => (m.events || []).filter((e) => e.type === "goal").sort((a, b) => a.m - b.m);
 
@@ -537,7 +618,7 @@
       const hold = p.goalHoldMs || 3500;
       const loop = () => {
         if (!state.snap || state.snap.phase !== "playing" || !state.sim) return;
-        simTick(state.sim, matchClock(Date.now() - p.startedAt, goalsOf(featured), p.clockMs, hold), Date.now());
+        simTick(state.sim, matchClock(Date.now() - p.startedAt, goalsOf(featured), p.clockMs, hold, featured.dur), Date.now());
         state.simRaf = requestAnimationFrame(loop);
       };
       state.simRaf = requestAnimationFrame(loop);
@@ -617,6 +698,7 @@
   // tireur, relances du gardien : tout est scripté de façon déterministe,
   // puis rendu avec des vitesses de course plafonnées (rien ne "flotte").
   function buildScript(match, dots, events, rng) {
+    const DUR = match.dur || 90;
     const outfield = (side) => dots.filter((d) => d.side === side && d.pos !== "GK");
     const gkOf = (side) => dots.find((d) => d.side === side && d.pos === "GK") || dots[0];
     const nearestTo = (list, pt) => list.slice().sort((u, v) => Math.hypot(u.home.x - pt.x, u.home.y - pt.y) - Math.hypot(v.home.x - pt.x, v.home.y - pt.y))[0];
@@ -706,8 +788,8 @@
         t += 0.8;
       }
     }
-    chainTo(89.6, null);
-    segs.push({ type: "hold", t0: t, t1: 91, c: carrier.idx, to: sb });
+    chainTo(DUR - 0.4, null);
+    segs.push({ type: "hold", t0: t, t1: DUR + 1, c: carrier.idx, to: sb });
     return segs;
   }
 
@@ -745,6 +827,7 @@
       ]) },
       { m: 83 + Math.floor(rng() * 5), text: `⏱️ Dernières minutes… tout peut encore arriver !` },
     ];
+    if ((match.dur || 90) > 90) list.push({ m: 90, text: "🔥 PROLONGATION ! 30 minutes pour se départager." });
     return list;
   }
 
@@ -915,10 +998,12 @@
     const elapsed = Date.now() - p.startedAt;
     const hold = p.goalHoldMs || 3500;
     const maxGoals = Math.max(0, ...p.matches.map((m) => goalsOf(m).length));
-    const ftAll = elapsed >= p.clockMs + maxGoals * hold; // toute la journée est finie
+    const maxDur = Math.max(90, ...p.matches.map((m) => m.dur || 90));
+    const anyShootout = p.matches.some((m) => m.shootout && !m.shootout.done);
+    const ftAll = !anyShootout && elapsed >= (p.clockMs * maxDur) / 90 + maxGoals * hold;
 
     if (featured) {
-      const mc = matchClock(elapsed, goalsOf(featured), p.clockMs, hold);
+      const mc = matchClock(elapsed, goalsOf(featured), p.clockMs, hold, featured.dur);
       // Ambiance : sifflet d'engagement, clameur sur but (+ vibration),
       // "ooh" sur occasion, triple sifflet au coup de sifflet final.
       const snd = state.snd || (state.snd = {});
@@ -969,6 +1054,14 @@
       if (mc.ft) {
         const motm = motmOf(featured.events);
         if (motm) lines.push({ m: 90, cls: "goal", text: `⭐ Homme du match : ${motm.name} (${motm.why})` });
+        (featured.injured || []).forEach((inj) => lines.push({ m: 90, cls: "amb", text: `🚑 ${inj.n} touché — forfait pour le prochain match.` }));
+      }
+      if (ftAll) {
+        // flash des autres terrains
+        p.matches.filter((m) => m !== featured).forEach((m) => {
+          const mo = motmOf(m.events);
+          lines.push({ m: 91, cls: "amb", text: `🏟️ ${m.an} ${m.ga}-${m.gb}${m.pens ? ` (${m.pens.pa}-${m.pens.pb} tab)` : ""} ${m.bn}${mo ? ` — ⭐ ${mo.name}` : ""}` });
+        });
       }
       lines.sort((a, b) => b.m - a.m);
       setHtml($("live-feed"),
@@ -999,12 +1092,44 @@
       $("instr-hint").style.display = "none";
     }
 
+    // Séance de tirs au but : panneau interactif
+    const so = featured && featured.shootout;
+    if (so) {
+      const secs = Math.max(0, Math.ceil((so.deadline - Date.now()) / 1000));
+      const iKick = featured && ((so.kicker && so.kicker.side === "a" ? featured.a : featured.b) === state.pid);
+      const iDive = featured && ((so.kicker && so.kicker.side === "a" ? featured.b : featured.a) === state.pid);
+      const row = (side) => so.kicks.filter((k) => k.side === side).map((k) => k.scored ? "🟢" : "🔴").join(" ") || "—";
+      const last = so.kicks[so.kicks.length - 1];
+      const pickedKey = so.turn + ":" + state.pid;
+      const canPick = so.phase === "await" && state.penPicked !== pickedKey && (iKick || iDive);
+      setHtml($("shootout"), `
+        <div class="pen-panel">
+          <div class="pen-title">⚔️ TIRS AU BUT</div>
+          <div class="pen-score"><span>${esc(featured.an)}</span><b>${so.pa} - ${so.pb}</b><span>${esc(featured.bn)}</span></div>
+          <div class="pen-rows"><div>${row("a")}</div><div>${row("b")}</div></div>
+          ${so.done
+            ? `<div class="pen-now">🏁 ${so.pa > so.pb ? esc(featured.an) : esc(featured.bn)} l'emporte aux tirs au but !</div>`
+            : so.phase === "await"
+              ? `<div class="pen-now">🎯 <b>${esc(so.kicker.name)}</b> s'élance… <span class="pen-timer">${secs}s</span></div>`
+              : `<div class="pen-now ${last && last.scored ? "ok" : "ko"}">${last ? (last.scored ? `✅ BUT de ${esc(last.name)} !` : `🧤 ARRÊTÉ ! Le gardien était du bon côté`) : ""}</div>`}
+          ${canPick ? `
+            <div class="pen-q">${iKick ? "Où tires-tu ?" : "Où plonge ton gardien ?"}</div>
+            <div class="pen-btns" data-role="${iKick ? "kick" : "dive"}">
+              <button data-dir="L">⬅️ Gauche</button>
+              <button data-dir="C">⏺ Centre</button>
+              <button data-dir="R">➡️ Droite</button>
+            </div>` : (so.phase === "await" && (iKick || iDive) ? '<p class="hint">✓ Choix enregistré — suspense…</p>' : "")}
+        </div>`);
+    } else {
+      setHtml($("shootout"), "");
+    }
+
     const others = p.matches.filter((m) => m !== featured);
     setText($("live-prev-title"), featured ? "Multiplex — touche un match pour le suivre" : "Tous les matchs");
     $("live-prev-title").style.display = others.length ? "" : "none";
     const kitOf2 = (pid) => { const pl = (state.snap.players || []).find((x) => x.pid === pid); return pl && pl.kit; };
     setHtml($("live-prev"), others.map((m) => {
-      const omc = matchClock(elapsed, goalsOf(m), p.clockMs, hold);
+      const omc = matchClock(elapsed, goalsOf(m), p.clockMs, hold, m.dur);
       const sc = scoreAt(m, omc.minute);
       const lastGoal = goalsOf(m).filter((e) => e.m <= omc.minute).pop();
       const isMine = m.a === state.pid || m.b === state.pid;
@@ -1049,6 +1174,21 @@
         : `${s.players.length} joueurs — on se passe le téléphone à chaque tour.`;
       return;
     }
+
+    // options de partie : l'hôte choisit, les autres voient
+    $("game-options").style.display = isLocal ? "none" : "";
+    document.querySelectorAll("#mode-picker button").forEach((b) => {
+      b.classList.toggle("on", b.dataset.mode === (s.mode || "snake"));
+      b.disabled = !isHost();
+    });
+    document.querySelectorAll("#theme-picker button").forEach((b) => {
+      b.classList.toggle("on", b.dataset.theme === (s.theme || "all"));
+      b.disabled = !isHost();
+    });
+    const pal = s.palmares || [];
+    $("palmares-box").style.display = pal.length ? "" : "none";
+    if (pal.length) setHtml($("palmares-list"), pal.map((r) =>
+      `<div class="pal-row"><span>${esc(r.name)}</span><span>${r.titles ? `🏆 ×${r.titles}` : ""}${r.titles && r.finals ? " · " : ""}${r.finals ? `🥈 ×${r.finals}` : ""}</span></div>`).join(""));
 
     if (qrDrawn !== s.code) {
       // Le QR est limité à ~106 octets : si l'URL est trop longue, on affiche
@@ -1099,6 +1239,10 @@
   // ---------- Draft ----------
   function renderDraft(s) {
     const d = s.draft; if (!d) return;
+    if (d.auction) return renderAuction(s, d);
+    $("auction-box").style.display = "none";
+    $("cards-grid").style.display = "";
+    $("draft-team").style.display = "";
     state.mode = "pick";
     const myTurn = d.currentPid === state.pid;
     $("draft-pick").textContent = d.pickNum;
@@ -1370,6 +1514,14 @@
 
   function matchModal(mm) {
     const evs = mm.events || [];
+    // confrontations précédentes du tournoi entre ces deux équipes
+    let h2h = "";
+    const t = state.snap && state.snap.tournament;
+    if (t) {
+      const prev = (t.matches || []).concat((t.knockout ? t.knockout.rounds.flat() : []))
+        .filter((x) => x !== mm && ((x.a === mm.a && x.b === mm.b) || (x.a === mm.b && x.b === mm.a)) && !(x.ga === mm.ga && x.gb === mm.gb && x.an === mm.an));
+      if (prev.length) h2h = `<div class="ms-h2h">Déjà croisés : ${prev.map((x) => `${x.ga}-${x.gb}`).join(", ")}</div>`;
+    }
     const legend = Object.keys(EV_LABEL).map((k) => `<span><i style="background:${EV_COLOR[k]}"></i>${EV_LABEL[k]}</span>`).join("");
     // Stats du match : tirs / cadrés / possession estimée
     const st = { a: { sh: 0, on: 0 }, b: { sh: 0, on: 0 } };
@@ -1392,6 +1544,7 @@
       </div>
       ${mm.pens ? `<div class="ms-pens">Tirs au but : ${mm.pens.pa} - ${mm.pens.pb}</div>` : ""}
       ${statsHtml}
+      ${h2h}
       ${(() => { const mo = motmOf(evs); return mo ? `<div class="ms-motm">⭐ Homme du match : ${esc(mo.name)} (${esc(mo.why)})</div>` : ""; })()}
       <div class="fm-legend">${legend}</div>
       ${fmPitchHtml(evs, 999)}

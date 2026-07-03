@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Football Draft" />
   <title>Football Draft — Ultimate National Teams</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
-  <link rel="stylesheet" href="css/styles.css?v=27" />
+  <link rel="stylesheet" href="css/styles.css?v=28" />
 </head>
 <body>
   <div id="app">
@@ -74,10 +74,32 @@
           <div class="patterns" id="kit-pattern"></div>
         </div>
 
+        <!-- Options de partie (hôte) -->
+        <div class="config" id="game-options">
+          <div class="config-title">Options de partie</div>
+          <div class="sub-label">Mode de draft</div>
+          <div class="formation-picker two" id="mode-picker">
+            <button data-mode="snake">🐍 Serpentin</button>
+            <button data-mode="auction">🔨 Enchères</button>
+          </div>
+          <div class="sub-label">Thème</div>
+          <div class="formation-picker two" id="theme-picker">
+            <button data-theme="all">Toutes époques</button>
+            <button data-theme="retro">Rétro ≤ 80s</button>
+            <button data-theme="modern">Moderne ≥ 2000s</button>
+            <button data-theme="onestar">Une seule 91+</button>
+          </div>
+        </div>
+
         <!-- Formation -->
         <div class="config" id="formation-config">
           <div class="config-title">Formation</div>
           <div class="formation-picker" id="formation-picker"></div>
+        </div>
+
+        <div class="config" id="palmares-box" style="display:none">
+          <div class="config-title">🏆 Palmarès de la bande</div>
+          <div id="palmares-list"></div>
         </div>
 
         <div class="players-title">Managers connectés (<span id="lobby-count">0</span>/8)</div>
@@ -114,6 +136,7 @@
       <div class="join-row draft-tools">
         <button class="btn btn-ghost btn-wide" id="btn-reroll" style="display:none">🎲 Relancer l'équipe (2)</button>
       </div>
+      <div id="auction-box" style="display:none"></div>
       <div class="cards-grid" id="cards-grid"></div>
       <div class="my-squad-mini" id="my-squad-mini"></div>
       <div class="dock">
@@ -133,6 +156,7 @@
       <div class="play-body">
         <div class="live-card" id="live-card"></div>
         <div id="live-stage"></div>
+        <div id="shootout"></div>
         <div id="live-summary"></div>
         <div class="instr-row" id="instr-row" style="display:none">
           <button class="instr-btn" data-st="off">🔥 Offensif</button>
@@ -195,10 +219,10 @@
   <!-- Feuille de match (temps forts + visuel façon FM) -->
   <div id="match-modal" class="modal"><div class="match-sheet" id="match-sheet"></div></div>
 
-  <script src="js/qrcode.js?v=27"></script>
-  <script src="js/model.js?v=27"></script>
-  <script src="js/engine.js?v=27"></script>
-  <script src="data/players.js?v=27"></script>
-  <script src="js/app.js?v=27"></script>
+  <script src="js/qrcode.js?v=28"></script>
+  <script src="js/model.js?v=28"></script>
+  <script src="js/engine.js?v=28"></script>
+  <script src="data/players.js?v=28"></script>
+  <script src="js/app.js?v=28"></script>
 </body>
 </html>

@@ -25,11 +25,49 @@ const PAUSE_MS = parseInt(process.env.PAUSE_MS, 10) || 7000;       // pause scor
 const GOAL_HOLD_MS = parseInt(process.env.GOAL_HOLD_MS, 10) || 3500; // l'horloge se fige sur chaque but (célébration)
 const REROLLS = 2; // relances d'équipe par joueur pendant le draft
 const PUBLIC_DIR = path.join(__dirname, "public");
+const PALMARES_FILE = path.join(__dirname, "palmares.json");
+const PALMARES = { data: {}, top: [] };
+try { PALMARES.data = JSON.parse(fs.readFileSync(PALMARES_FILE, "utf8")); } catch (_) {}
+function refreshPalmares() {
+  PALMARES.top = Object.entries(PALMARES.data)
+    .map(([name, v]) => ({ name, titles: v.titles || 0, finals: v.finals || 0 }))
+    .sort((x, y) => y.titles - x.titles || y.finals - x.finals)
+    .slice(0, 8);
+}
+refreshPalmares();
+function recordPalmares(room) {
+  const t = room.tournament;
+  if (!t || !t.champion) return;
+  const finale = t.knockout && t.knockout.rounds[t.knockout.rounds.length - 1];
+  const add = (pid, field) => {
+    const pl = playerByPid(room, pid);
+    if (!pl) return;
+    const rec = PALMARES.data[pl.name] || { titles: 0, finals: 0 };
+    rec[field]++;
+    PALMARES.data[pl.name] = rec;
+  };
+  add(t.champion.id, "titles");
+  if (finale && finale[0]) add(finale[0].a === t.champion.id ? finale[0].b : finale[0].a, "finals");
+  refreshPalmares();
+  fs.writeFile(PALMARES_FILE, JSON.stringify(PALMARES.data), () => {});
+}
 
 // ---------------------------------------------------------------------------
 // Salles
 // ---------------------------------------------------------------------------
 const rooms = new Map();
+
+// Thèmes de draft : filtre du vivier de joueurs.
+const THEMES = {
+  all:    { label: "Toutes époques", filter: () => true },
+  retro:  { label: "Rétro (≤ 1980s)", filter: (p) => ["1950s", "1960s", "1970s", "1980s"].indexOf(p.d) >= 0 },
+  modern: { label: "Moderne (≥ 2000s)", filter: (p) => ["2000s", "2010s", "2020s"].indexOf(p.d) >= 0 },
+  onestar:{ label: "Une seule 91+", filter: () => true },
+};
+function themePool(room) {
+  const th = THEMES[room.theme] || THEMES.all;
+  return PLAYERS.filter(th.filter);
+}
 
 function genCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -51,6 +89,8 @@ function createRoom() {
     nextPid: 1,
     hostPid: null,
     squadSize: SQUAD_SIZE,
+    theme: "all",
+    mode: "snake", // snake | auction
     draft: null,
     tournament: null,
     turnTimer: null,
@@ -97,6 +137,7 @@ function snapshot(room) {
       connected: p.connected,
       isHost: p.pid === room.hostPid,
       formationKey: p.formationKey,
+      penTaker: p.penTaker != null ? p.penTaker : null,
       teamName: p.teamName || p.name,
       kit: p.kit,
       squad: sp,
@@ -112,9 +153,28 @@ function snapshot(room) {
     phase: room.phase,
     hostPid: room.hostPid,
     squadSize: room.squadSize,
+    theme: room.theme,
+    mode: room.mode,
+    palmares: PALMARES.top,
     players,
   };
 
+  if (room.phase === "draft" && room.mode === "auction" && room.auction && room.auction.current) {
+    const cur = room.auction.current;
+    const pl = PLAYERS[cur.playerId];
+    snap.draft = {
+      auction: true,
+      totalPicks: DRAFT_PICKS * room.players.length,
+      pickNum: room.players.reduce((u, p) => u + p.squad.length, 0) + 1,
+      player: Object.assign({}, pl, { price: MODEL.marketValue(pl) }),
+      price: cur.price,
+      nextPrice: nextBidPrice(cur),
+      bestPid: cur.bestPid,
+      bestName: cur.bestPid != null ? (playerByPid(room, cur.bestPid) || {}).teamName || (playerByPid(room, cur.bestPid) || {}).name : null,
+      deadline: cur.deadline,
+      budget: MODEL.BUDGET,
+    };
+  }
   if (room.phase === "draft" && room.draft) {
     const d = room.draft;
     const drafter = playerByPid(room, d.currentPid);
@@ -175,9 +235,78 @@ function broadcastPick(room, payload) {
 // ---------------------------------------------------------------------------
 // Draft
 // ---------------------------------------------------------------------------
+const AUCTION_FIRST_MS = parseInt(process.env.AUCTION_FIRST_MS, 10) || 9000; // temps après mise à prix
+const AUCTION_BID_MS = parseInt(process.env.AUCTION_BID_MS, 10) || 6000;   // temps relancé après chaque enchère
+
+function auctionFits(room, player, pl) {
+  if (player.squad.length >= DRAFT_PICKS) return false;
+  const need = neededPositions(room, player);
+  const needTotal = Object.values(need).reduce((u, v) => u + v, 0);
+  const benchFree = DRAFT_PICKS - player.squad.length - needTotal > 0;
+  if (!(need[pl.pos] > 0 || benchFree)) return false;
+  if (room.theme === "onestar" && pl.r >= 91 && squadPlayers(room, player).some((x) => x.r >= 91)) return false;
+  return true;
+}
+function auctionMaxBid(room, player) {
+  // réserve : ~2,5 M€ par place restante après celle-ci
+  const slotsAfter = DRAFT_PICKS - player.squad.length - 1;
+  return MODEL.BUDGET - player.spent - slotsAfter * 2.5;
+}
+function nextBidPrice(cur) {
+  return cur.bestPid == null ? cur.price : Math.round((cur.price + Math.max(2, cur.price * 0.12)) * 2) / 2;
+}
+function startAuction(room) {
+  const pool = themePool(room).slice().sort((x, y) =>
+    (MODEL.marketValue(y) + Math.random() * 18) - (MODEL.marketValue(x) + Math.random() * 18));
+  room.auction = { pool, idx: 0, current: null, timer: null };
+  nextLot(room);
+}
+function nextLot(room) {
+  const a = room.auction;
+  clearTimeout(a.timer);
+  if (room.players.every((p) => p.squad.length >= DRAFT_PICKS)) return finishDraft(room);
+  while (a.idx < a.pool.length) {
+    const pl = a.pool[a.idx++];
+    if (draftedIds(room).has(pl.id)) continue;
+    const eligible = room.players.some((p) => auctionFits(room, p, pl) && MODEL.marketValue(pl) * 0.5 <= auctionMaxBid(room, p));
+    if (!eligible) continue;
+    a.current = { playerId: pl.id, price: Math.max(1, Math.round(MODEL.marketValue(pl) * 0.5 * 2) / 2), bestPid: null, deadline: Date.now() + AUCTION_FIRST_MS };
+    a.timer = setTimeout(() => resolveLot(room), AUCTION_FIRST_MS);
+    broadcast(room);
+    return;
+  }
+  // vivier épuisé : compléter au moins cher, gratuitement
+  for (const p of room.players) {
+    while (p.squad.length < DRAFT_PICKS) {
+      const need = neededPositions(room, p);
+      const rest = themePool(room).filter((x) => !draftedIds(room).has(x.id));
+      // d'abord un joueur du poste manquant, sinon n'importe qui (pick "hors poste")
+      const pool2 = rest.filter((x) => need[x.pos] > 0 || Object.keys(need).length === 0);
+      const cheap = (pool2.length ? pool2 : rest).sort((x, y) => MODEL.marketValue(x) - MODEL.marketValue(y))[0];
+      if (!cheap) break;
+      p.squad.push(cheap.id);
+    }
+  }
+  finishDraft(room);
+}
+function resolveLot(room) {
+  const a = room.auction;
+  const cur = a.current;
+  if (!cur) return;
+  if (cur.bestPid != null) {
+    const winner = playerByPid(room, cur.bestPid);
+    winner.squad.push(cur.playerId);
+    winner.spent += cur.price;
+    broadcastPick(room, { pid: cur.bestPid, player: PLAYERS[cur.playerId], auto: false, from: "enchères", price: cur.price });
+  }
+  a.current = null;
+  nextLot(room);
+}
+
 function startDraft(room) {
   room.phase = "draft";
-  room.players.forEach((p) => { p.squad = []; p.spent = 0; p.rerolls = REROLLS; });
+  room.players.forEach((p) => { p.squad = []; p.spent = 0; p.rerolls = REROLLS; p.penTaker = null; });
+  if (room.mode === "auction") return startAuction(room);
   // Tirage au sort de l'ordre de passage (serpentin ensuite).
   const pids = room.players.map((p) => p.pid);
   for (let i = pids.length - 1; i > 0; i--) {
@@ -200,7 +329,11 @@ function prepareTurn(room) {
   const need = neededPositions(room, drafter);
   // Réserve : garder de quoi payer les postes restants (~2 M€ chacun).
   const budget = { left: MODEL.BUDGET - drafter.spent, needCounts: need, slotsLeft: DRAFT_PICKS - drafter.squad.length };
-  d.currentTeam = engine.drawTeamForTurn(PLAYERS, drafted, new Set(Object.keys(need)), budget);
+  let pool = themePool(room);
+  if (room.theme === "onestar" && squadPlayers(room, drafter).some((p) => p.r >= 91)) {
+    pool = pool.filter((p) => p.r < 91);
+  }
+  d.currentTeam = engine.drawTeamForTurn(pool, drafted, new Set(Object.keys(need)), budget);
   d.deadline = Date.now() + TURN_SECONDS * 1000;
   scheduleAutoPick(room);
   broadcast(room);
@@ -252,6 +385,7 @@ function finishDraft(room) {
     id: p.pid, name: p.teamName || p.name,
     players: squadPlayers(room, p),
     formationKey: p.formationKey,
+    penTaker: p.penTaker != null ? p.penTaker : null,
   }));
   // Simulation PROGRESSIVE : chaque journée est jouée à son coup d'envoi
   // (forme, rotation, suspensions et instructions du match en dépendent).
@@ -261,6 +395,9 @@ function finishDraft(room) {
   startRound(room);
 }
 
+const PEN_INPUT_MS = parseInt(process.env.PEN_INPUT_MS, 10) || 12000; // temps pour choisir tir/plongeon
+const PEN_REVEAL_MS = parseInt(process.env.PEN_REVEAL_MS, 10) || 2600;  // suspense entre deux tirs
+
 function startRound(room) {
   clearTimeout(room.revealTimer);
   const round = engine.playNextRound(room.tstate);
@@ -269,16 +406,99 @@ function startRound(room) {
   room.reveal.idx++;
   room.reveal.startedAt = Date.now();
   const maxGoals = Math.max(0, ...round.matches.map((m) => (m.events || []).filter((e) => e.type === "goal").length));
+  const maxDur = Math.max(90, ...round.matches.map((m) => m.dur || 90)); // prolongations
+  const playMs = Math.round((MATCH_MS * maxDur) / 90) + maxGoals * GOAL_HOLD_MS;
   room.revealTimer = setTimeout(() => {
-    engine.settleRound(room.tstate, round);
-    if (room.tstate.done) finishReveal(room);
-    else startRound(room);
-  }, MATCH_MS + maxGoals * GOAL_HOLD_MS + PAUSE_MS);
+    const tied = round.type === "ko" ? round.matches.filter((m) => m.ga === m.gb && m.winner == null) : [];
+    if (tied.length) {
+      tied.forEach((m) => buildShootout(room, m)); // séance interactive
+    } else {
+      room.revealTimer = setTimeout(() => advanceAfterRound(room, round), PAUSE_MS);
+    }
+  }, playMs);
   broadcast(room);
+}
+
+function advanceAfterRound(room, round) {
+  engine.settleRound(room.tstate, round);
+  if (room.tstate.done) finishReveal(room);
+  else startRound(room);
+}
+
+// ---- Séance de tirs au but : chaque tir attend les choix des deux managers
+function buildShootout(room, m) {
+  const mk = (side) => {
+    const pid = side === "a" ? m.a : m.b;
+    const rp = playerByPid(room, pid);
+    const team = side === "a" ? m._ta : m._tb;
+    const ks = team.players.filter((p) => p.pos !== "GK").sort((u, v) => engine.shoOf(v) - engine.shoOf(u)).slice(0, 8);
+    if (rp && rp.penTaker != null) {
+      const i = ks.findIndex((p) => p.id === rp.penTaker);
+      if (i > 0) ks.unshift(ks.splice(i, 1)[0]);
+    }
+    return ks;
+  };
+  const gk = (side) => { const t = side === "a" ? m._ta : m._tb; return t.players.find((p) => p.pos === "GK") || t.players[0]; };
+  m.shootout = {
+    pa: 0, pb: 0, kicks: [], turn: 0, phase: "await", done: false,
+    _ka: mk("a"), _kb: mk("b"), _gka: gk("a"), _gkb: gk("b"),
+    pending: { shot: null, dive: null }, kicker: null, deadline: 0,
+    _rng: engine.makeRng(engine.seedFor(m.a, m.b, m.salt) ^ 0x7e7e7e7),
+  };
+  armKick(room, m);
+}
+
+function armKick(room, m) {
+  const so = m.shootout;
+  const side = so.turn % 2 === 0 ? "a" : "b";
+  const ks = side === "a" ? so._ka : so._kb;
+  const kp = ks[Math.floor(so.turn / 2) % ks.length];
+  so.kicker = { side, name: kp.n, sho: engine.shoOf(kp) };
+  so.phase = "await";
+  so.pending = { shot: null, dive: null };
+  so.deadline = Date.now() + PEN_INPUT_MS;
+  clearTimeout(so._timer);
+  so._timer = setTimeout(() => resolveKick(room, m), PEN_INPUT_MS);
+  broadcast(room);
+}
+
+function resolveKick(room, m) {
+  const so = m.shootout;
+  if (!so || so.done || so.phase !== "await") return;
+  clearTimeout(so._timer);
+  const dirs = ["L", "C", "R"];
+  const shot = so.pending.shot || dirs[Math.floor(so._rng() * 3)];
+  const dive = so.pending.dive || dirs[Math.floor(so._rng() * 3)];
+  const gk = so.kicker.side === "a" ? so._gkb : so._gka;
+  const scored = engine.resolvePenalty(shot, dive, so.kicker.sho, gk.r, so._rng());
+  if (scored) { if (so.kicker.side === "a") so.pa++; else so.pb++; }
+  so.kicks.push({ side: so.kicker.side, name: so.kicker.name, dir: shot, dive, scored });
+  so.turn++;
+  so.phase = "reveal";
+  const ta = so.kicks.filter((k) => k.side === "a").length;
+  const tb = so.kicks.filter((k) => k.side === "b").length;
+  let done = false;
+  if (tb <= 5 && so.pa > so.pb + (5 - tb)) done = true;
+  if (ta <= 5 && so.pb > so.pa + (5 - ta)) done = true;
+  if (ta >= 5 && tb >= 5 && ta === tb && so.pa !== so.pb) done = true;
+  if (done) {
+    so.done = true;
+    m.pens = { pa: so.pa, pb: so.pb };
+    m.winner = so.pa > so.pb ? m.a : m.b;
+    broadcast(room);
+    const round = room.reveal.current;
+    if (!round.matches.some((x) => x.ga === x.gb && (!x.shootout || !x.shootout.done))) {
+      room.revealTimer = setTimeout(() => advanceAfterRound(room, round), PAUSE_MS);
+    }
+  } else {
+    broadcast(room);
+    so._timer = setTimeout(() => armKick(room, m), PEN_REVEAL_MS);
+  }
 }
 
 function finishReveal(room) {
   clearTimeout(room.revealTimer);
+  if (room.reveal && room.reveal.current) room.reveal.current.matches.forEach((m) => { if (m.shootout) clearTimeout(m.shootout._timer); });
   // au cas où on saute la diffusion : terminer le tournoi d'un coup
   if (room.tstate && !room.tstate.done) {
     if (room.reveal && room.reveal.current) engine.settleRound(room.tstate, room.reveal.current);
@@ -287,6 +507,7 @@ function finishReveal(room) {
   }
   room.phase = "results";
   room.tournament = engine.finalizeTournament(room.tstate);
+  recordPalmares(room);
   broadcast(room);
 }
 
@@ -294,6 +515,9 @@ function finishReveal(room) {
 function resetRoom(room) {
   clearTimeout(room.turnTimer);
   clearTimeout(room.revealTimer);
+  if (room.auction) clearTimeout(room.auction.timer);
+  room.auction = null;
+  if (room.reveal && room.reveal.current) room.reveal.current.matches.forEach((m) => { if (m.shootout) clearTimeout(m.shootout._timer); });
   room.phase = "lobby";
   room.draft = null;
   room.tournament = null;
@@ -301,6 +525,21 @@ function resetRoom(room) {
   room.reveal = null;
   room.players.forEach((pl) => { pl.squad = []; pl.spent = 0; });
   broadcast(room);
+}
+
+// Choix de tir / plongeon pendant une séance de tirs au but.
+function penInput(msg, kind) {
+  const room = rooms.get(msg.code);
+  if (!room || room.phase !== "playing" || !room.reveal || !room.reveal.current) return { ok: false };
+  if (["L", "C", "R"].indexOf(msg.dir) < 0) return { ok: false };
+  const m = room.reveal.current.matches.find((x) => x.shootout && !x.shootout.done && x.shootout.phase === "await"
+    && (kind === "shot"
+      ? (x.shootout.kicker.side === "a" ? x.a : x.b) === msg.pid
+      : (x.shootout.kicker.side === "a" ? x.b : x.a) === msg.pid));
+  if (!m) return { ok: false, error: "Pas de tir en attente pour toi." };
+  m.shootout.pending[kind] = msg.dir;
+  if (m.shootout.pending.shot && m.shootout.pending.dive) resolveKick(room, m);
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -373,6 +612,10 @@ const ACTIONS = {
     const room = rooms.get(msg.code);
     if (!room || room.phase !== "lobby" || msg.pid !== room.hostPid) return { ok: false };
     if (room.players.length < 2) return { ok: false, error: "Il faut au moins 2 joueurs." };
+    if (themePool(room).length < room.players.length * DRAFT_PICKS) {
+      const maxN = Math.floor(themePool(room).length / DRAFT_PICKS);
+      return { ok: false, error: `Vivier trop petit pour ce thème : ${maxN} managers max.` };
+    }
     startDraft(room);
     return { ok: true };
   },
@@ -405,6 +648,51 @@ const ACTIONS = {
     if (!drafter || !(drafter.rerolls > 0)) return { ok: false, error: "Plus de relance disponible." };
     drafter.rerolls--;
     prepareTurn(room);
+    return { ok: true };
+  },
+  bid(msg) {
+    const room = rooms.get(msg.code);
+    const player = room && playerByPid(room, msg.pid);
+    if (!room || !player || room.phase !== "draft" || room.mode !== "auction" || !room.auction || !room.auction.current) return { ok: false };
+    const cur = room.auction.current;
+    if (cur.bestPid === msg.pid) return { ok: false, error: "Tu es déjà le mieux offrant." };
+    const pl = PLAYERS[cur.playerId];
+    if (!auctionFits(room, player, pl)) return { ok: false, error: "Ne rentre pas dans ton effectif." };
+    const price = nextBidPrice(cur);
+    if (price > auctionMaxBid(room, player)) return { ok: false, error: "Au-dessus de tes moyens (réserve comprise)." };
+    cur.price = price;
+    cur.bestPid = msg.pid;
+    cur.deadline = Date.now() + AUCTION_BID_MS;
+    clearTimeout(room.auction.timer);
+    room.auction.timer = setTimeout(() => resolveLot(room), AUCTION_BID_MS);
+    broadcast(room);
+    return { ok: true };
+  },
+  penKick(msg) { return penInput(msg, "shot"); },
+  penDive(msg) { return penInput(msg, "dive"); },
+  setTheme(msg) {
+    const room = rooms.get(msg.code);
+    if (!room || room.phase !== "lobby" || msg.pid !== room.hostPid || !THEMES[msg.theme]) return { ok: false };
+    room.theme = msg.theme;
+    broadcast(room);
+    return { ok: true };
+  },
+  setMode(msg) {
+    const room = rooms.get(msg.code);
+    if (!room || room.phase !== "lobby" || msg.pid !== room.hostPid || ["snake", "auction"].indexOf(msg.mode) < 0) return { ok: false };
+    room.mode = msg.mode;
+    broadcast(room);
+    return { ok: true };
+  },
+  // 3. Tireur de penalty désigné (utilisé pour les pens du match + 1er tireur TAB)
+  setPenTaker(msg) {
+    const room = rooms.get(msg.code);
+    const player = room && playerByPid(room, msg.pid);
+    if (!player) return { ok: false };
+    const pl = PLAYERS[msg.playerId];
+    if (!pl || player.squad.indexOf(msg.playerId) < 0 || pl.pos === "GK") return { ok: false };
+    player.penTaker = msg.playerId;
+    broadcast(room);
     return { ok: true };
   },
   // Instruction tactique pendant SON match (max 3 par match, impact <= 6 %).

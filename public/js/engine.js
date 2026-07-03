@@ -416,6 +416,25 @@
   }
   const teamOf = (t, id) => t.teams.find((x) => x.id === id);
 
+  // Prolongation : 30 minutes supplémentaires à intensité réduite.
+  function extraTime(m, seed) {
+    const rng = makeRng(seed ^ 0x51ed270b);
+    const sa = teamStrength(m._ta.players), sb = teamStrength(m._tb.players);
+    sa.atk += m._ta.bonus || 0; sb.atk += m._tb.bonus || 0;
+    sa.def += m._ta.bonus || 0; sb.def += m._tb.bonus || 0;
+    const lamA = Math.max(0.05, 1.32 * Math.pow(2, (sa.atk - sb.def) / 8) * (30 / 90) * 0.85);
+    const lamB = Math.max(0.05, 1.32 * Math.pow(2, (sb.atk - sa.def) / 8) * (30 / 90) * 0.85);
+    const ga = Math.min(2, poisson(lamA, rng)), gb = Math.min(2, poisson(lamB, rng));
+    const evs = finalizeEvents(
+      teamChances(m._ta, m._tb, ga, "a", sb, rng),
+      teamChances(m._tb, m._ta, gb, "b", sa, rng),
+      rng, 91
+    ).map((ev) => Object.assign(ev, { m: Math.min(119, Math.max(91, ev.m)) }));
+    m.events = (m.events || []).concat(evs).sort((x, y) => x.m - y.m);
+    m.ga += ga; m.gb += gb;
+    m.dur = 120;
+  }
+
   function playMatchPair(t, a, b, salt, ko) {
     const A = teamOf(t, a), B = teamOf(t, b);
     const avail = (team) => {
@@ -428,9 +447,25 @@
     const ta = { id: a, name: A.name, players: la.starters, bonus: ca.bonus };
     const tb = { id: b, name: B.name, players: lb.starters, bonus: cb.bonus };
     const res = simulateMatch(ta, tb, seedFor(a, b, salt));
-    return { a, b, an: A.name, bn: B.name, ga: res.ga, gb: res.gb, events: res.events,
-      ko: !!ko, salt, stanceA: "bal", stanceB: "bal", instr: {},
+    const m = { a, b, an: A.name, bn: B.name, ga: res.ga, gb: res.gb, events: res.events,
+      ko: !!ko, salt, dur: 90, stanceA: "bal", stanceB: "bal", instr: {},
       _ta: ta, _tb: tb, _benchA: la.bench, _benchB: lb.bench };
+    if (ko && m.ga === m.gb) extraTime(m, seedFor(a, b, salt)); // prolongation
+    // tireur de penalty désigné : il frappe les penalties du match
+    const takerOf = (team, tk) => (tk && team.players.find((p) => p.id === tk)) ||
+      team.players.filter((p) => p.pos !== "GK").sort((u, v) => shoOf(v) - shoOf(u))[0];
+    m._tkA = takerOf(ta, A.penTaker); m._tkB = takerOf(tb, B.penTaker);
+    retagPenalties(m);
+    return m;
+  }
+
+  // Réattribue chaque penalty au tireur désigné de l'équipe.
+  function retagPenalties(m) {
+    (m.events || []).forEach((ev) => {
+      if (!ev.pen) return;
+      const tk = ev.side === "a" ? m._tkA : m._tkB;
+      if (tk) { ev.scorer = tk.n; ev.code = tk.code; ev.sho = shoOf(tk); ev.text = commentary(ev); }
+    });
   }
 
   function applyFatigue(t, m) {
@@ -438,12 +473,19 @@
     for (const p of (m._benchA || []).concat(m._benchB || [])) t.fatigue[p.id] = Math.max(0, (t.fatigue[p.id] || 0) - 1);
   }
 
-  // Purge puis enregistre les suspensions (rouge = prochain match manqué).
+  // Purge puis enregistre suspensions (rouge) et blessures légères.
   function applySuspensions(t, matches) {
     for (const k in t.suspended) t.suspended[k] = Math.max(0, t.suspended[k] - 1);
     matches.forEach((m) => (m.events || []).forEach((ev) => {
       if (ev.type === "red" && ev.playerId != null) t.suspended[ev.playerId] = 1;
     }));
+    // blessures : déterministes par match, ~2 % par titulaire
+    matches.forEach((m) => {
+      const rng = makeRng(seedFor(m.a, m.b, m.salt) ^ 0xb105e55);
+      m._ta.players.concat(m._tb.players).forEach((p) => {
+        if (rng() < 0.02) { t.suspended[p.id] = 1; m.injured = (m.injured || []).concat([{ n: p.n, id: p.id }]); }
+      });
+    });
   }
 
   // Joue la journée / le tour suivant. Retourne { stage, type, matches } ou null.
@@ -483,6 +525,7 @@
     if (!round || round.type !== "ko") return;
     const winners = [];
     for (const m of round.matches) {
+      if (m.winner != null) { winners.push(m.winner); continue; } // séance interactive déjà jouée
       if (m.ga === m.gb) {
         const rng = makeRng(seedFor(m.a, m.b, m.salt) ^ 0x9e3779b9);
         let pa = 0, pb = 0;
@@ -521,13 +564,36 @@
     m.events = kept.concat(newEvs).sort((x, y) => x.m - y.m);
     m.ga = ka + gaN;
     m.gb = kb + gbN;
+    // en KO, la prolongation dépend du nouveau score après 90'
+    if (m.ko) {
+      m.dur = 90;
+      if (m.ga === m.gb) extraTime(m, seedFor(m.a, m.b, m.salt));
+    }
+    retagPenalties(m);
+  }
+
+  // ---- Tirs au but interactifs ----
+  // dirTir/dirPlongeon dans {"L","C","R"} ; sho = note de tir, gkr = note gardien.
+  function resolvePenalty(shotDir, diveDir, sho, gkr, rngv) {
+    const same = shotDir === diveDir;
+    let p;
+    if (same) p = Math.max(0.05, Math.min(0.2, 0.10 + (sho - gkr) / 400));
+    else p = Math.max(0.68, Math.min(0.95, 0.85 + (sho - gkr) / 300));
+    return rngv < p;
+  }
+  function publicShootout(so) {
+    return { pa: so.pa, pb: so.pb, turn: so.turn, phase: so.phase, done: so.done,
+      kicker: so.kicker ? { side: so.kicker.side, name: so.kicker.name } : null,
+      deadline: so.deadline || 0,
+      kicks: so.kicks.map((k) => ({ side: k.side, name: k.name, scored: k.scored, dir: k.dir, dive: k.dive })) };
   }
 
   // Vue publique d'un match (sans les champs internes _ta/_tb).
   function publicMatch(m) {
     return { a: m.a, b: m.b, an: m.an, bn: m.bn, ga: m.ga, gb: m.gb, round: m.round,
-      events: m.events, pens: m.pens || null, winner: m.winner, ko: m.ko,
-      stanceA: m.stanceA, stanceB: m.stanceB, instr: m.instr || {} };
+      events: m.events, pens: m.pens || null, winner: m.winner, ko: m.ko, dur: m.dur || 90,
+      injured: m.injured || null,
+      stanceA: m.stanceA, stanceB: m.stanceB, instr: m.instr || {}, shootout: m.shootout ? publicShootout(m.shootout) : null };
   }
 
   function computeScorers(allMatches) {
@@ -561,5 +627,6 @@
   }
 
   return { teamStrength, simulateMatch, simulateKnockout, roundRobin, computeStandings, seedFor, drawTeamForTurn, runTournament, buildRounds,
-    createTournament, playNextRound, settleRound, applyInstruction, publicMatch, finalizeTournament, formMalus };
+    createTournament, playNextRound, settleRound, applyInstruction, publicMatch, finalizeTournament, formMalus,
+    resolvePenalty, publicShootout, shoOf, makeRng };
 });

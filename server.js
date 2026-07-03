@@ -19,6 +19,7 @@ const PLAYERS = RAW_PLAYERS.map((p, i) => ({ id: i, ...p }));
 const PORT = process.env.PORT || 3000;
 const TURN_SECONDS = 45;
 const SQUAD_SIZE = 11; // toutes les équipes ont 11 joueurs
+const REVEAL_MS = parseInt(process.env.REVEAL_MS, 10) || 6500; // rythme de diffusion des matchs
 const PUBLIC_DIR = path.join(__dirname, "public");
 
 // ---------------------------------------------------------------------------
@@ -118,6 +119,21 @@ function snapshot(room) {
       team: d.currentTeam,
       needed: drafter ? neededPositions(room, drafter) : {},
       deadline: d.deadline,
+      budget: MODEL.BUDGET,
+      budgetLeft: drafter ? MODEL.BUDGET - drafter.spent : 0,
+    };
+  }
+
+  if (room.phase === "playing" && room.reveal) {
+    const { idx, list } = room.reveal;
+    const cur = list[Math.min(idx, list.length - 1)];
+    snap.playing = {
+      idx: idx + 1,
+      total: list.length,
+      stage: cur.stage,
+      type: cur.type,
+      match: cur.m,
+      results: list.slice(0, idx).map((e) => ({ stage: e.stage, an: e.m.an, bn: e.m.bn, ga: e.m.ga, gb: e.m.gb, pens: e.m.pens || null })),
     };
   }
 
@@ -146,7 +162,7 @@ function broadcastPick(room, payload) {
 // ---------------------------------------------------------------------------
 function startDraft(room) {
   room.phase = "draft";
-  room.players.forEach((p) => (p.squad = []));
+  room.players.forEach((p) => { p.squad = []; p.spent = 0; });
   const pids = room.players.map((p) => p.pid);
   const order = [];
   for (let r = 0; r < SQUAD_SIZE; r++) {
@@ -162,7 +178,9 @@ function prepareTurn(room) {
   const drafter = playerByPid(room, d.currentPid);
   const drafted = draftedIds(room);
   const need = neededPositions(room, drafter);
-  d.currentTeam = engine.drawTeamForTurn(PLAYERS, drafted, new Set(Object.keys(need)));
+  // Réserve : garder de quoi payer les postes restants (~2 M€ chacun).
+  const budget = { left: MODEL.BUDGET - drafter.spent, reserve: 3 * (SQUAD_SIZE - drafter.squad.length - 1) };
+  d.currentTeam = engine.drawTeamForTurn(PLAYERS, drafted, new Set(Object.keys(need)), budget);
   d.deadline = Date.now() + TURN_SECONDS * 1000;
   scheduleAutoPick(room);
   broadcast(room);
@@ -178,7 +196,9 @@ function scheduleAutoPick(room) {
 function autoPick(room) {
   const d = room.draft;
   if (!d || !d.currentTeam) return;
-  const pick = d.currentTeam.options.find((o) => o.eligible) || d.currentTeam.options.find((o) => !o.taken);
+  // Auto-pick : le meilleur éligible, sinon le moins cher encore libre.
+  const pick = d.currentTeam.options.find((o) => o.eligible)
+    || d.currentTeam.options.filter((o) => !o.taken).sort((a, b) => a.price - b.price)[0];
   if (pick) applyPick(room, d.currentPid, pick.id, true);
 }
 
@@ -193,7 +213,8 @@ function applyPick(room, pid, playerId, auto) {
   if (draftedIds(room).has(playerId)) return false;
 
   drafter.squad.push(playerId);
-  broadcastPick(room, { pid, player: PLAYERS[playerId], auto: !!auto, from: d.currentTeam.country });
+  drafter.spent += MODEL.marketValue(PLAYERS[playerId]);
+  broadcastPick(room, { pid, player: PLAYERS[playerId], auto: !!auto, from: d.currentTeam.country, price: MODEL.marketValue(PLAYERS[playerId]) });
 
   d.pickNum++;
   clearTimeout(room.turnTimer);
@@ -203,17 +224,32 @@ function applyPick(room, pid, playerId, auto) {
 }
 
 // ---------------------------------------------------------------------------
-// Tournoi (logique partagée dans engine.js)
+// Tournoi (logique partagée dans engine.js) + diffusion match par match
 // ---------------------------------------------------------------------------
 function finishDraft(room) {
-  room.phase = "results";
   clearTimeout(room.turnTimer);
   const teams = room.players.map((p) => {
     const sp = squadPlayers(room, p);
     const chem = MODEL.chemistry(sp, p.formationKey);
     return { id: p.pid, name: p.teamName || p.name, players: sp, bonus: chem.bonus, chem: chem.teamChem };
   });
-  room.tournament = engine.runTournament(teams);
+  room.fullTournament = engine.runTournament(teams);
+  // Diffusion : les matchs sont révélés un par un avant l'écran final.
+  room.phase = "playing";
+  room.reveal = { idx: 0, list: engine.buildReveal(room.fullTournament) };
+  clearInterval(room.revealTimer);
+  room.revealTimer = setInterval(() => {
+    room.reveal.idx++;
+    if (room.reveal.idx >= room.reveal.list.length) finishReveal(room);
+    else broadcast(room);
+  }, REVEAL_MS);
+  broadcast(room);
+}
+
+function finishReveal(room) {
+  clearInterval(room.revealTimer);
+  room.phase = "results";
+  room.tournament = room.fullTournament;
   broadcast(room);
 }
 
@@ -230,6 +266,7 @@ function joinRoomInternal(room, name) {
     name: String(name || "Joueur").slice(0, 16),
     connected: false,
     squad: [],
+    spent: 0,
     formationKey: "4-3-3",
     teamName: "",
     kit: { p: KIT_PALETTE[idx % KIT_PALETTE.length], s: "#ffffff", pat: "plain" },
@@ -298,11 +335,20 @@ const ACTIONS = {
   playAgain(msg) {
     const room = rooms.get(msg.code);
     if (!room || msg.pid !== room.hostPid) return { ok: false };
+    clearInterval(room.revealTimer);
     room.phase = "lobby";
     room.draft = null;
     room.tournament = null;
-    room.players.forEach((pl) => (pl.squad = []));
+    room.fullTournament = null;
+    room.reveal = null;
+    room.players.forEach((pl) => { pl.squad = []; pl.spent = 0; });
     broadcast(room);
+    return { ok: true };
+  },
+  skipReveal(msg) {
+    const room = rooms.get(msg.code);
+    if (!room || room.phase !== "playing" || msg.pid !== room.hostPid) return { ok: false };
+    finishReveal(room);
     return { ok: true };
   },
 };

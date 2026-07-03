@@ -173,7 +173,21 @@
     return { placement, links, perChem, teamChem, bonus };
   }
 
-  const M = { FORMATIONS, DEFAULT_FORMATION, formationsForSize, positionCounts, computeStats, chemistry, placeInSlots, slotLinks };
+  // ------------------------------------------------------------------
+  // Valeur marchande (en M€), dérivée de la note et du poste : courbe
+  // exponentielle façon marché réel (les attaquants coûtent plus cher).
+  // ------------------------------------------------------------------
+  const BUDGET = 350; // budget global par manager, en M€
+  const POS_VALUE = { FWD: 1.15, MID: 1.0, DEF: 0.9, GK: 0.8 };
+  function marketValue(p) {
+    let v = 5 * Math.pow(1.163, p.r - 75) * (POS_VALUE[p.pos] || 1);
+    if (v >= 10) v = Math.round(v);
+    else if (v >= 1) v = Math.round(v * 2) / 2;
+    else v = Math.max(0.3, Math.round(v * 10) / 10);
+    return v;
+  }
+
+  const M = { FORMATIONS, DEFAULT_FORMATION, formationsForSize, positionCounts, computeStats, chemistry, placeInSlots, slotLinks, marketValue, BUDGET };
   if (typeof module !== "undefined" && module.exports) module.exports = M;
   else root.MODEL = M;
 })(typeof window !== "undefined" ? window : this);

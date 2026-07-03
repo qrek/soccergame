@@ -169,29 +169,64 @@
   const seedFor = (a, b, salt) => ((a * 73856093) ^ (b * 19349663) ^ (salt * 83492791)) >>> 0;
 
   // Tire une équipe nationale au sort pour le tour de draft courant.
-  // Retourne TOUS les joueurs du pays, les déjà draftés marqués `taken`
-  // (visibles mais bloqués pour les autres managers).
-  function drawTeamForTurn(allPlayers, draftedIds, neededPos) {
+  // Retourne TOUS les joueurs du pays : les déjà draftés marqués `taken`,
+  // les inabordables marqués `expensive`. budget = { left, reserve } :
+  // un joueur est abordable si son prix laisse de quoi finir l'effectif.
+  function drawTeamForTurn(allPlayers, draftedIds, neededPos, budget) {
+    const maxPrice = budget ? budget.left - budget.reserve : Infinity;
     const byCountry = new Map();
     for (const p of allPlayers) {
       if (!byCountry.has(p.c)) byCountry.set(p.c, []);
       byCountry.get(p.c).push(p);
     }
-    const hasFree = (list, posSet) => list.some((p) => !draftedIds.has(p.id) && (!posSet || posSet.has(p.pos)));
-    let candidates = [...byCountry.entries()].filter(([, l]) => hasFree(l, neededPos));
-    let relaxed = false;
-    if (!candidates.length) {
-      candidates = [...byCountry.entries()].filter(([, l]) => hasFree(l, null));
-      relaxed = true;
+    const free = (p) => !draftedIds.has(p.id);
+    const afford = (p) => MODEL.marketValue(p) <= maxPrice;
+    const needed = (p) => neededPos.has(p.pos);
+    const entries = [...byCountry.entries()];
+
+    // Repli hiérarchique : le POSTE prime sur le budget pour garder des
+    // formations valides — le budget ne cède qu'en dernier recours.
+    const stages = [
+      { test: (p) => free(p) && afford(p) && needed(p), pos: true, bud: true },
+      { test: (p) => free(p) && afford(p), pos: false, bud: true },
+      { test: (p) => free(p) && needed(p), pos: true, bud: false },
+      { test: (p) => free(p), pos: false, bud: false },
+    ];
+    let stage = stages[stages.length - 1];
+    let candidates = [];
+    for (const st of stages) {
+      candidates = entries.filter(([, l]) => l.some(st.test));
+      if (candidates.length) { stage = st; break; }
     }
+
     const [country, list] = candidates[Math.floor(Math.random() * candidates.length)];
     const options = list
       .map((p) => {
         const taken = draftedIds.has(p.id);
-        return Object.assign({}, p, { taken, eligible: !taken && (relaxed || neededPos.has(p.pos)) });
+        const price = MODEL.marketValue(p);
+        const affordable = !stage.bud || price <= maxPrice;
+        return Object.assign({}, p, {
+          taken, price,
+          expensive: !taken && stage.bud && !afford(p),
+          eligible: !taken && affordable && (!stage.pos || needed(p)),
+        });
       })
       .sort((a, b) => (a.taken - b.taken) || (b.r - a.r));
-    return { country, code: list[0].code, options, relaxed };
+    return { country, code: list[0].code, options, relaxed: !stage.pos };
+  }
+
+  // Ordre de diffusion des matchs : championnat journée par journée,
+  // puis phases finales tour par tour.
+  function buildReveal(t) {
+    const list = [];
+    t.matches.forEach((m) => list.push({ stage: "Journée " + m.round, type: "league", m }));
+    if (t.knockout) {
+      t.knockout.rounds.forEach((round, i) => {
+        const label = ({ 1: "Finale", 2: "Demi-finale", 3: "Quart de finale" })[t.knockout.rounds.length - i] || "Tour";
+        round.forEach((m) => list.push({ stage: label, type: "ko", m }));
+      });
+    }
+    return list;
   }
 
   function buildKnockout(standings, teamById, K) {
@@ -241,5 +276,5 @@
     };
   }
 
-  return { teamStrength, simulateMatch, simulateKnockout, roundRobin, computeStandings, seedFor, drawTeamForTurn, runTournament };
+  return { teamStrength, simulateMatch, simulateKnockout, roundRobin, computeStandings, seedFor, drawTeamForTurn, runTournament, buildReveal };
 });

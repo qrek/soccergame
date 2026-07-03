@@ -265,3 +265,27 @@ body {
 .taken-badge { position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%) rotate(-14deg);
   background: var(--danger); color: #fff; font-weight: 900; font-size: 13px; letter-spacing: 3px;
   padding: 3px 14px; border-radius: 8px; z-index: 2; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+
+/* Fix : les notes ne débordent plus des lignes d'effectif (écran Équipes). */
+.squad-players .sp { min-width: 0; }
+.sp .spn { flex: 1 1 auto; min-width: 0; }
+.sp .spr, .sp .spos { flex-shrink: 0; }
+
+/* Prix sur les cartes + budget du draft */
+.fut-badges { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.fut .price { font-size: 10px; font-weight: 800; color: var(--accent); white-space: nowrap; }
+.fut.expensive { opacity: .45; pointer-events: none; }
+.fut.expensive .price { color: var(--danger); }
+.expensive-badge { background: #6b2530; font-size: 11px; letter-spacing: 1.5px; }
+.budget-chip { border-color: rgba(0, 255, 135, .4); }
+.budget-chip b { color: var(--accent); }
+
+/* Écran EN DIRECT (diffusion des matchs) */
+.play-body { display: flex; flex-direction: column; gap: 12px; }
+.live-card { background: var(--panel); border: 1px solid var(--panel-b); border-radius: 18px; padding: 20px 16px; text-align: center; box-shadow: var(--shadow); }
+.live-card .lc-stage { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+.live-card .lc-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.live-card .lc-team { flex: 1; font-weight: 800; font-size: 16px; min-width: 0; }
+.live-card .lc-score { font-size: 34px; font-weight: 900; color: var(--accent); white-space: nowrap; }
+.live-card .lc-pens { margin-top: 8px; color: var(--muted); font-size: 13px; }
+#live-summary .evline { background: var(--panel); border-radius: 10px; border-top: none; margin-bottom: 4px; }

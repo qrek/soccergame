@@ -45,12 +45,15 @@
     opts = opts || {};
     const stats = MODEL.computeStats(pl); // PAC/SHO/PAS/DRI/DEF/PHY (ou stats GK)
     const statsHtml = stats.map((s) => `<span class="cell"><b>${s.value}</b><i>${s.label}</i></span>`).join("");
-    return `<div class="fut ${tierClass(pl.r)} ${pl.taken ? "taken" : opts.disabled ? "disabled" : ""}" data-id="${pl.id}">
+    const price = pl.price != null ? pl.price : MODEL.marketValue(pl);
+    const stateClass = pl.taken ? "taken" : pl.expensive ? "expensive" : opts.disabled ? "disabled" : "";
+    return `<div class="fut ${tierClass(pl.r)} ${stateClass}" data-id="${pl.id}">
       ${pl.taken ? '<span class="taken-badge">PRIS</span>' : ""}
+      ${pl.expensive ? '<span class="taken-badge expensive-badge">TROP CHER</span>' : ""}
       <div class="fut-inner">
         <div class="fut-top">
           <div class="fut-rating"><span class="r">${pl.r}</span><span class="p">${pl.pos}</span></div>
-          <div class="fut-badges"><span class="flag">${flag(pl.code)}</span></div>
+          <div class="fut-badges"><span class="flag">${flag(pl.code)}</span><span class="price">${fmtM(price)}</span></div>
         </div>
         <div class="fut-name">${esc(pl.n)}</div>
         <div class="fut-sub">${esc(pl.c)} · ${esc(pl.d)}</div>
@@ -84,7 +87,7 @@
     const i = local.players.length;
     local.players.push({
       pid: local.nextPid++, name: String(name || "Joueur " + (i + 1)).slice(0, 16),
-      squad: [], formationKey: "4-3-3",
+      squad: [], spent: 0, formationKey: "4-3-3",
       kit: { p: KIT_PALETTE[i % KIT_PALETTE.length], s: "#ffffff", pat: PATTERNS[i % PATTERNS.length] },
     });
   }
@@ -112,7 +115,14 @@
       const cur = local.players.find((p) => p.pid === d.currentPid);
       snap.draft = { pickNum: d.pickNum + 1, totalPicks: d.order.length, currentPid: d.currentPid,
         currentName: cur.name, round: Math.floor(d.pickNum / local.players.length) + 1,
-        team: d.currentTeam, needed: localNeeded(cur), deadline: 0 };
+        team: d.currentTeam, needed: localNeeded(cur), deadline: 0,
+        budget: MODEL.BUDGET, budgetLeft: MODEL.BUDGET - cur.spent };
+    }
+    if (local.phase === "playing" && local.reveal) {
+      const { idx, list } = local.reveal;
+      const cur = list[Math.min(idx, list.length - 1)];
+      snap.playing = { idx: idx + 1, total: list.length, stage: cur.stage, type: cur.type, match: cur.m,
+        results: list.slice(0, idx).map((e) => ({ stage: e.stage, an: e.m.an, bn: e.m.bn, ga: e.m.ga, gb: e.m.gb, pens: e.m.pens || null })) };
     }
     if (local.phase === "results") snap.tournament = local.tournament;
     return snap;
@@ -128,11 +138,12 @@
     const d = local.draft;
     d.currentPid = d.order[d.pickNum];
     const cur = local.players.find((p) => p.pid === d.currentPid);
-    d.currentTeam = ENGINE.drawTeamForTurn(LPLAYERS, localDrafted(), new Set(Object.keys(localNeeded(cur))));
+    const budget = { left: MODEL.BUDGET - cur.spent, reserve: 3 * (11 - cur.squad.length - 1) };
+    d.currentTeam = ENGINE.drawTeamForTurn(LPLAYERS, localDrafted(), new Set(Object.keys(localNeeded(cur))), budget);
   }
 
   function localStart() {
-    local.players.forEach((p) => { p.squad = []; });
+    local.players.forEach((p) => { p.squad = []; p.spent = 0; });
     const pids = local.players.map((p) => p.pid);
     const order = [];
     for (let r = 0; r < 11; r++) order.push(...(r % 2 === 0 ? pids : pids.slice().reverse()));
@@ -149,14 +160,17 @@
     if (!opt || !opt.eligible || localDrafted().has(playerId)) return;
     const cur = local.players.find((p) => p.pid === d.currentPid);
     cur.squad.push(LPLAYERS[playerId]);
+    cur.spent += MODEL.marketValue(LPLAYERS[playerId]);
     d.pickNum++;
     if (d.pickNum >= d.order.length) {
-      local.phase = "results";
       const teams = local.players.map((p) => {
         const chem = MODEL.chemistry(p.squad, p.formationKey);
         return { id: p.pid, name: p.name, players: p.squad, bonus: chem.bonus, chem: chem.teamChem };
       });
       local.tournament = ENGINE.runTournament(teams);
+      // Diffusion : on avance match par match avec le bouton.
+      local.phase = "playing";
+      local.reveal = { idx: 0, list: ENGINE.buildReveal(local.tournament) };
     } else {
       localPrepareTurn();
     }
@@ -166,7 +180,14 @@
   function localApi(type, extra) {
     if (type === "startGame") { if (local.players.length >= 2) localStart(); }
     else if (type === "pick") localPick(extra.playerId);
-    else if (type === "playAgain") { local.phase = "lobby"; local.draft = null; local.tournament = null; local.players.forEach((p) => { p.squad = []; }); localRender(); }
+    else if (type === "nextMatch") {
+      if (local.phase === "playing" && local.reveal) {
+        local.reveal.idx++;
+        if (local.reveal.idx >= local.reveal.list.length) local.phase = "results";
+        localRender();
+      }
+    }
+    else if (type === "playAgain") { local.phase = "lobby"; local.draft = null; local.tournament = null; local.reveal = null; local.players.forEach((p) => { p.squad = []; p.spent = 0; }); localRender(); }
     else if (type === "setFormation") { const p = local.players.find((x) => x.pid === state.pid); if (p && MODEL.FORMATIONS[extra.formationKey]) { p.formationKey = extra.formationKey; localRender(); } }
     return Promise.resolve({ ok: true });
   }
@@ -242,6 +263,8 @@
   });
   $("btn-start").addEventListener("click", () => api("startGame"));
   $("btn-again").addEventListener("click", () => api("playAgain"));
+  $("btn-next-match").addEventListener("click", () => api("nextMatch"));
+  $("btn-skip").addEventListener("click", () => api("skipReveal"));
 
   // ---------- Onglets ----------
   document.querySelector(".tabs").addEventListener("click", (e) => {
@@ -256,7 +279,43 @@
     const s = state.snap; if (!s) return;
     if (s.phase === "lobby") { renderLobby(s); show("screen-lobby"); }
     else if (s.phase === "draft") { renderDraft(s); show("screen-draft"); }
+    else if (s.phase === "playing") { renderPlaying(s); show("screen-playing"); }
     else if (s.phase === "results") { renderResults(s); show("screen-results"); }
+  }
+
+  // ---------- Diffusion des matchs (EN DIRECT) ----------
+  const fmtM = (v) => (v >= 10 ? String(Math.round(v)) : String(v).replace(".", ",")) + " M€";
+
+  function renderPlaying(s) {
+    clearInterval(timerInterval);
+    const p = s.playing; if (!p) return;
+    const isLocal = s.code === "LOCAL";
+    $("play-stage").textContent = `${p.stage} · ${p.idx}/${p.total}`;
+
+    const m = p.match;
+    $("live-card").innerHTML = `
+      <div class="lc-stage">${esc(p.stage)}</div>
+      <div class="lc-row">
+        <span class="lc-team">${esc(m.an)}</span>
+        <span class="lc-score">${m.ga} - ${m.gb}</span>
+        <span class="lc-team">${esc(m.bn)}</span>
+      </div>
+      ${m.pens ? `<div class="lc-pens">Tirs au but : ${m.pens.pa} - ${m.pens.pb}</div>` : ""}`;
+
+    const goals = (m.events || []).filter((e) => e.type === "goal");
+    $("live-summary").innerHTML = goals.length
+      ? goals.map((e) => `<div class="evline goal"><span class="min">${e.m}'</span><span class="etxt">⚽ ${esc(e.scorer)} (${esc(e.teamName)})</span></div>`).join("")
+      : '<p class="hint">Aucun but — les défenses ont tenu bon.</p>';
+
+    $("btn-next-match").style.display = isLocal ? "" : "none";
+    $("btn-skip").style.display = !isLocal && isHost() ? "" : "none";
+
+    const prev = (p.results || []).slice(-8).reverse();
+    $("live-prev-title").style.display = prev.length ? "" : "none";
+    $("live-prev").innerHTML = prev.map((r) => `
+      <div class="match"><span class="side"><span>${esc(r.an)}</span></span>
+      <span class="score">${r.ga}-${r.gb}${r.pens ? `<span class="pens"> (${r.pens.pa}-${r.pens.pb})</span>` : ""}</span>
+      <span class="side" style="justify-content:flex-end"><span>${esc(r.bn)}</span></span></div>`).join("");
   }
 
   // ---------- Lobby ----------
@@ -347,8 +406,11 @@
     $("team-flag").textContent = flag(d.team.code);
     $("draft-team-name").textContent = d.team.country;
 
-    $("need-bar").innerHTML = Object.entries(d.needed).map(([pos, n]) => `<span class="need-chip">${pos} <b>×${n}</b></span>`).join("")
-      || '<span class="need-chip">Effectif complet</span>';
+    const budgetChip = d.budget != null
+      ? `<span class="need-chip budget-chip">💰 <b>${fmtM(Math.round(d.budgetLeft * 10) / 10)}</b> / ${fmtM(d.budget)}</span>` : "";
+    $("need-bar").innerHTML = budgetChip
+      + (Object.entries(d.needed).map(([pos, n]) => `<span class="need-chip">${pos} <b>×${n}</b></span>`).join("")
+      || '<span class="need-chip">Effectif complet</span>');
 
     const grid = $("cards-grid");
     grid.classList.toggle("locked", !myTurn);
@@ -587,11 +649,16 @@
       ["Théo", "Bob", "Carol"].forEach((n) => localAddPlayer(n));
       if (autolocal === "lobby") { localRender(); return; }
       localStart();
-      if (autolocal === "full") {
+      if (autolocal === "full" || autolocal === "playing") {
         const iv = setInterval(() => {
-          if (local.phase !== "draft") { clearInterval(iv); return; }
-          const opt = local.draft.currentTeam.options.find((o) => o.eligible);
-          if (opt) localPick(opt.id);
+          if (local.phase === "draft") {
+            const opt = local.draft.currentTeam.options.find((o) => o.eligible);
+            if (opt) localPick(opt.id);
+          } else if (local.phase === "playing" && autolocal === "full") {
+            localApi("nextMatch", {});
+          } else if (local.phase === "results" || (local.phase === "playing" && autolocal === "playing")) {
+            clearInterval(iv);
+          }
         }, 25);
       }
       return;

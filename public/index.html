@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#04121f" />
   <title>Football Draft — Ultimate National Teams</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
-  <link rel="stylesheet" href="css/styles.css?v=8" />
+  <link rel="stylesheet" href="css/styles.css?v=9" />
 </head>
 <body>
   <div id="app">
@@ -101,6 +101,7 @@
       <div class="need-bar" id="need-bar"></div>
       <div class="cards-grid" id="cards-grid"></div>
       <div class="my-squad-mini" id="my-squad-mini"></div>
+      <button class="btn btn-ghost btn-wide btn-danger" id="btn-reset-draft">🔄 Réinitialiser la partie</button>
     </section>
 
     <!-- ================= DIFFUSION DES MATCHS ================= -->
@@ -115,6 +116,7 @@
         <div id="live-summary"></div>
         <button class="btn btn-primary" id="btn-next-match" style="display:none">Match suivant ▶</button>
         <button class="btn btn-ghost btn-wide" id="btn-skip" style="display:none">Passer la diffusion ⏭</button>
+        <button class="btn btn-ghost btn-wide btn-danger" id="btn-reset-playing">🔄 Réinitialiser la partie</button>
         <div class="round-title" id="live-prev-title" style="display:none">Déjà joués</div>
         <div id="live-prev"></div>
       </div>
@@ -142,6 +144,7 @@
         <div class="tab-panel" id="tab-squads"></div>
 
         <button class="btn btn-primary" id="btn-again" style="display:none">Rejouer</button>
+        <button class="btn btn-ghost btn-wide btn-danger" id="btn-reset-results" style="display:none">🔄 Réinitialiser la partie</button>
       </div>
     </section>
   </div>
@@ -152,10 +155,10 @@
   <!-- Feuille de match (temps forts + visuel façon FM) -->
   <div id="match-modal" class="modal"><div class="match-sheet" id="match-sheet"></div></div>
 
-  <script src="js/qrcode.js?v=8"></script>
-  <script src="js/model.js?v=8"></script>
-  <script src="js/engine.js?v=8"></script>
-  <script src="data/players.js?v=8"></script>
-  <script src="js/app.js?v=8"></script>
+  <script src="js/qrcode.js?v=9"></script>
+  <script src="js/model.js?v=9"></script>
+  <script src="js/engine.js?v=9"></script>
+  <script src="data/players.js?v=9"></script>
+  <script src="js/app.js?v=9"></script>
 </body>
 </html>

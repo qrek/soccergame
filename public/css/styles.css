@@ -319,3 +319,6 @@ body {
 .stage-note { position: absolute; left: 50%; bottom: 7px; transform: translateX(-50%);
   background: rgba(4, 15, 9, .88); border: 1px solid rgba(255,255,255,.14); color: var(--text);
   padding: 4px 14px; border-radius: 16px; font-size: 12.5px; font-weight: 800; white-space: nowrap; }
+
+/* Bouton de réinitialisation (discret, rouge) */
+.btn-danger { border-color: rgba(255, 84, 112, .4); color: #ff8ba0; font-size: 14px; padding: 12px 18px; }

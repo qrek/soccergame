@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v8 — replay 11v11";
+  const APP_VERSION = "v9 — bouton reset";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -192,7 +192,7 @@
         localRender();
       }
     }
-    else if (type === "playAgain") { local.phase = "lobby"; local.draft = null; local.tournament = null; local.reveal = null; local.players.forEach((p) => { p.squad = []; p.spent = 0; }); localRender(); }
+    else if (type === "playAgain" || type === "resetGame") { local.phase = "lobby"; local.draft = null; local.tournament = null; local.reveal = null; local.players.forEach((p) => { p.squad = []; p.spent = 0; }); localRender(); }
     else if (type === "setFormation") { const p = local.players.find((x) => x.pid === state.pid); if (p && MODEL.FORMATIONS[extra.formationKey]) { p.formationKey = extra.formationKey; localRender(); } }
     return Promise.resolve({ ok: true });
   }
@@ -270,6 +270,10 @@
   $("btn-again").addEventListener("click", () => api("playAgain"));
   $("btn-next-match").addEventListener("click", () => api("nextMatch"));
   $("btn-skip").addEventListener("click", () => api("skipReveal"));
+
+  // Réinitialisation d'urgence (confirmée) — accessible à tous les joueurs.
+  const confirmReset = () => { if (confirm("Réinitialiser la partie pour tout le monde et revenir au salon ?")) api("resetGame"); };
+  ["btn-reset-draft", "btn-reset-playing", "btn-reset-results"].forEach((id) => $(id).addEventListener("click", confirmReset));
 
   // ---------- Onglets ----------
   document.querySelector(".tabs").addEventListener("click", (e) => {
@@ -752,6 +756,8 @@
     }).join("");
 
     $("btn-again").style.display = isHost() ? "" : "none";
+    // Sans l'hôte, chacun peut quand même relancer via la réinitialisation.
+    $("btn-reset-results").style.display = isHost() ? "none" : "";
   }
   const ord = (pos) => ({ GK: 0, DEF: 1, MID: 2, FWD: 3 }[pos] ?? 4);
 

@@ -261,6 +261,19 @@ function finishReveal(room) {
   broadcast(room);
 }
 
+// Remet la salle au salon (noms, maillots et formations conservés).
+function resetRoom(room) {
+  clearTimeout(room.turnTimer);
+  clearTimeout(room.revealTimer);
+  room.phase = "lobby";
+  room.draft = null;
+  room.tournament = null;
+  room.fullTournament = null;
+  room.reveal = null;
+  room.players.forEach((pl) => { pl.squad = []; pl.spent = 0; });
+  broadcast(room);
+}
+
 // ---------------------------------------------------------------------------
 // Actions (POST /api)
 // ---------------------------------------------------------------------------
@@ -343,14 +356,15 @@ const ACTIONS = {
   playAgain(msg) {
     const room = rooms.get(msg.code);
     if (!room || msg.pid !== room.hostPid) return { ok: false };
-    clearTimeout(room.revealTimer);
-    room.phase = "lobby";
-    room.draft = null;
-    room.tournament = null;
-    room.fullTournament = null;
-    room.reveal = null;
-    room.players.forEach((pl) => { pl.squad = []; pl.spent = 0; });
-    broadcast(room);
+    resetRoom(room);
+    return { ok: true };
+  },
+  // Réinitialisation d'urgence : n'importe quel joueur de la salle peut
+  // ramener tout le monde au salon (partie bloquée, hôte parti...).
+  resetGame(msg) {
+    const room = rooms.get(msg.code);
+    if (!room || !playerByPid(room, msg.pid)) return { ok: false };
+    resetRoom(room);
     return { ok: true };
   },
   skipReveal(msg) {

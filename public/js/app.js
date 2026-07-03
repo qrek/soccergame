@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v14 — match simulé en continu";
+  const APP_VERSION = "v15 — barre de jeu";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -321,7 +321,8 @@
 
   // Réinitialisation d'urgence (confirmée) — accessible à tous les joueurs.
   const confirmReset = () => { if (confirm("Réinitialiser la partie pour tout le monde et revenir au salon ?")) api("resetGame"); };
-  ["btn-reset-lobby", "btn-reset-draft", "btn-reset-playing", "btn-reset-results"].forEach((id) => $(id).addEventListener("click", confirmReset));
+  ["btn-reset-lobby", "btn-reset-results"].forEach((id) => $(id).addEventListener("click", confirmReset));
+  document.querySelectorAll(".js-reset").forEach((b) => b.addEventListener("click", confirmReset));
 
   // Quitter la session : retour à l'accueil (et libère sa place au salon).
   $("btn-leave").addEventListener("click", () => {

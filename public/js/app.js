@@ -40,48 +40,44 @@
       <path d="M43 15 L50 23 L57 15" fill="none" stroke="${s}" stroke-width="3"/></svg>`;
   }
 
-  // ---------- Carte FUT ----------
-  const monogram = (n) => n.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-  const hashN = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
-
-  // Zone "portrait" : avatar généré (dégradé déterministe + initiales).
-  function photoHtml(pl) {
-    const h = hashN(pl.n + pl.c);
-    const hue = h % 360, hue2 = (hue + 40) % 360;
-    const bg = `background:radial-gradient(120% 100% at 50% 0%, hsl(${hue} 45% 38%), hsl(${hue2} 40% 18%))`;
-    return `<div class="fut-photo" style="${bg}">
-      <span class="silhouette">${monogram(pl.n)}</span></div>`;
-  }
-
+  // ---------- Carte joueur (épurée) ----------
   function futCard(pl, opts) {
     opts = opts || {};
-    const stats = MODEL.computeStats(pl); // [PAC,SHO,PAS,DRI,DEF,PHY] ou GK
-    const order = [0, 3, 1, 4, 2, 5]; // agencement 2 colonnes façon FIFA
-    const statsHtml = order.map((i) => `<span><span class="lab">${stats[i].label}</span><b>${stats[i].value}</b></span>`).join("");
+    const stats = MODEL.computeStats(pl); // PAC/SHO/PAS/DRI/DEF/PHY (ou stats GK)
+    const statsHtml = stats.map((s) => `<span class="cell"><b>${s.value}</b><i>${s.label}</i></span>`).join("");
     return `<div class="fut ${tierClass(pl.r)} ${opts.disabled ? "disabled" : ""}" data-id="${pl.id}">
       <div class="fut-inner">
         <div class="fut-top">
           <div class="fut-rating"><span class="r">${pl.r}</span><span class="p">${pl.pos}</span></div>
           <div class="fut-badges"><span class="flag">${flag(pl.code)}</span></div>
         </div>
-        ${photoHtml(pl)}
         <div class="fut-name">${esc(pl.n)}</div>
+        <div class="fut-sub">${esc(pl.c)} · ${esc(pl.d)}</div>
         <div class="fut-stats">${statsHtml}</div>
       </div></div>`;
   }
 
   // ---------- Réseau ----------
   async function api(type, extra) {
-    const res = await fetch("/api", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(Object.assign({ type, code: state.code, pid: state.pid }, extra || {})) });
-    return res.json();
+    try {
+      const res = await fetch("api", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(Object.assign({ type, code: state.code, pid: state.pid }, extra || {})) });
+      if (!res.ok) return { ok: false, error: "Erreur serveur (" + res.status + ")." };
+      return await res.json();
+    } catch (e) {
+      return { ok: false, error: "Serveur injoignable — lance `node server.js` et ouvre l'adresse qu'il affiche." };
+    }
   }
 
   function connect() {
     if (state.es) state.es.close();
-    const es = new EventSource(`/events?code=${state.code}&pid=${state.pid}`);
+    const es = new EventSource(`events?code=${state.code}&pid=${state.pid}`);
     state.es = es;
-    es.addEventListener("state", (e) => { state.snap = JSON.parse(e.data); render(); });
+    es.addEventListener("state", (e) => {
+      state.snap = JSON.parse(e.data); render();
+      // Mode capture : fermer le flux après le premier rendu pour les screenshots.
+      if (new URLSearchParams(location.search).has("shot")) setTimeout(() => es.close(), 300);
+    });
     es.addEventListener("pick", (e) => {
       const p = JSON.parse(e.data);
       const who = (state.snap && state.snap.players.find((x) => x.pid === p.pid)) || {};
@@ -99,8 +95,7 @@
   $("btn-join").addEventListener("click", async () => {
     const code = $("home-code").value.trim().toUpperCase();
     if (code.length !== 4) { $("home-error").textContent = "Code à 4 caractères."; return; }
-    const r = await fetch("/api", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "joinRoom", code, name: $("home-name").value.trim() || "Joueur" }) }).then((x) => x.json());
+    const r = await api("joinRoom", { code, name: $("home-name").value.trim() || "Joueur" });
     if (r.ok) { state.code = r.code; state.pid = r.pid; saveSession(); connect(); } else $("home-error").textContent = r.error || "Erreur";
   });
   $("home-code").addEventListener("input", (e) => { e.target.value = e.target.value.toUpperCase(); });
@@ -152,7 +147,17 @@
     $("lobby-code").textContent = s.code;
     $("lobby-code-big").textContent = s.code;
     $("lobby-count").textContent = s.players.length;
-    if (qrDrawn !== s.code) { $("qr-holder").innerHTML = renderQR(`${location.origin}/?room=${s.code}`); qrDrawn = s.code; }
+    if (qrDrawn !== s.code) {
+      // Le QR est limité à ~106 octets : si l'URL est trop longue, on affiche
+      // seulement le code au lieu de faire échouer tout le rendu du lobby.
+      try {
+        const url = location.origin + location.pathname.replace(/[^/]*$/, "") + "?room=" + s.code;
+        $("qr-holder").innerHTML = renderQR(url);
+      } catch (_) {
+        $("qr-holder").innerHTML = '<p class="hint">QR indisponible — partage le code ci-dessous.</p>';
+      }
+      qrDrawn = s.code;
+    }
 
     const m = me();
     const kit = myKit();
@@ -423,12 +428,14 @@
     const mock = params.get("mock");
     if (mock) {
       document.body.classList.add("no-anim");
-      fetch("/_mock/" + mock + ".json").then((r) => r.json()).then((d) => {
+      fetch("_mock/" + mock + ".json").then((r) => r.json()).then((d) => {
         state.code = d.snap.code; state.pid = d.viewPid; state.snap = d.snap; render();
         if (params.get("open") && state.matchMap && state.matchMap.size) matchModal(state.matchMap.values().next().value);
       });
       return;
     }
+    // Hook de test : simule un clic réel sur « Créer une session ».
+    if (params.has("autocreate")) { document.body.classList.add("no-anim"); setTimeout(() => $("btn-create").click(), 200); return; }
 
     const roomParam = (params.get("room") || params.get("code") || "").toUpperCase();
     if (roomParam) $("home-code").value = roomParam;

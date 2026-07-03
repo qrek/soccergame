@@ -121,34 +121,34 @@ body {
 .cards-grid { display: grid; grid-template-columns: repeat(2, 1fr); grid-auto-rows: min-content; align-content: start; gap: 12px; overflow-y: auto; flex: 1; padding-bottom: 8px; }
 .cards-grid.locked .fut { opacity: .4; filter: grayscale(.55); pointer-events: none; }
 
-/* ============ CARTE FUT ============ */
-/* Forme d'écusson FUT : hauts chanfreinés, base effilée. */
-.fut { position: relative; aspect-ratio: 0.72; cursor: pointer; overflow: hidden;
-  clip-path: polygon(11% 0, 89% 0, 100% 6.5%, 100% 83%, 86% 100%, 14% 100%, 0 83%, 0 6.5%);
-  background: linear-gradient(150deg, #55637a, #1b2431); color: #0b1420;
-  box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.3); transition: transform .12s; }
+/* ============ CARTE JOUEUR (épurée) ============ */
+/* Fond sombre en dégradé, bordure dégradée par tier, lueur discrète. */
+.fut { position: relative; aspect-ratio: 0.74; cursor: pointer; overflow: hidden; border-radius: 16px;
+  border: 1.5px solid transparent;
+  background: linear-gradient(168deg, #18201b, #0b0f0c 75%) padding-box,
+              var(--tier-grad, linear-gradient(160deg, #5b6a61, #2a332d)) border-box;
+  color: var(--text); transition: transform .12s; }
+.fut::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(95% 60% at 18% 0%, var(--tier-glow, rgba(255,255,255,.07)), transparent 60%); }
 .fut:active { transform: scale(.96); }
-.fut.disabled { opacity: .38; filter: grayscale(.6); pointer-events: none; }
-.fut.tier-elite { background: linear-gradient(150deg, #eafcff, #8fd8f2 45%, #2f7fa8); color: #06222e; box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.65); }
-.fut.tier-gold { background: linear-gradient(150deg, #fdeeae, #e6b84a 55%, #b9871c); color: #3a2600; }
-.fut.tier-silver { background: linear-gradient(150deg, #f4f7fa, #b9c2cc 60%, #8b96a2); color: #1c2530; }
-.fut.tier-bronze { background: linear-gradient(150deg, #edb98a, #b5773f 60%, #7d4a22); color: #2a1400; }
-.fut-inner { position: absolute; inset: 0; padding: 9px 10px; display: flex; flex-direction: column; }
+.fut.disabled { opacity: .35; filter: grayscale(.6); pointer-events: none; }
+.fut.tier-elite  { --tier-grad: linear-gradient(160deg, #b5f3ff, #2ea8d8); --tier-c: #8fe8ff; --tier-glow: rgba(120, 220, 255, .15); }
+.fut.tier-gold   { --tier-grad: linear-gradient(160deg, #f5dd8b, #b98a1e); --tier-c: #f2d06b; --tier-glow: rgba(242, 208, 107, .13); }
+.fut.tier-silver { --tier-grad: linear-gradient(160deg, #e8eef3, #8d9aa6); --tier-c: #d6dee5; --tier-glow: rgba(214, 222, 229, .11); }
+.fut.tier-bronze { --tier-grad: linear-gradient(160deg, #e2a76e, #7d4a22); --tier-c: #e0a36b; --tier-glow: rgba(224, 163, 107, .11); }
+.fut-inner { position: absolute; inset: 0; padding: 13px 12px 11px; display: flex; flex-direction: column; }
 .fut-top { display: flex; justify-content: space-between; align-items: flex-start; }
-.fut-rating { display: flex; flex-direction: column; align-items: center; line-height: .9; }
-.fut-rating .r { font-size: 27px; font-weight: 900; }
-.fut-rating .p { font-size: 11px; font-weight: 800; opacity: .85; }
-.fut-badges { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.fut-badges .flag { font-size: 20px; }
-.fut-badges .kit-tiny { width: 22px; height: 22px; }
-.fut-photo { flex: 1; display: grid; place-items: center; position: relative; border-radius: 8px; margin: 4px 2px; overflow: hidden; }
-.fut-photo .silhouette { font-size: 46px; font-weight: 900; color: rgba(255,255,255,.85); letter-spacing: 1px; }
-.fut-photo img.ph { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.fut-name { text-align: center; font-weight: 900; font-size: 14px; text-transform: uppercase; letter-spacing: .3px; padding: 3px 0; border-top: 1px solid rgba(0,0,0,.28); }
-.fut-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 8px; font-size: 11px; font-weight: 700; padding: 0 9% 4px; }
-.fut-stats span { display: flex; justify-content: space-between; }
-.fut-stats b { font-weight: 900; }
-.fut-stats .lab { opacity: .72; }
+.fut-rating { display: flex; flex-direction: column; line-height: 1; }
+.fut-rating .r { font-size: 33px; font-weight: 900; color: var(--tier-c); }
+.fut-rating .p { font-size: 10.5px; font-weight: 800; letter-spacing: 2.5px; color: var(--muted); margin-top: 3px; }
+.fut-badges .flag { font-size: 23px; }
+.fut-name { flex: 1; display: grid; place-items: center; text-align: center; font-weight: 900; font-size: 15.5px;
+  text-transform: uppercase; letter-spacing: .5px; line-height: 1.25; padding: 0 2px; }
+.fut-sub { text-align: center; font-size: 9.5px; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px; }
+.fut-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px 2px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,.09); }
+.fut-stats .cell { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+.fut-stats .cell b { font-size: 13.5px; font-weight: 900; }
+.fut-stats .cell i { font-style: normal; font-size: 8.5px; color: var(--muted); letter-spacing: 1.2px; }
 
 .my-squad-mini { display: flex; gap: 5px; flex-wrap: wrap; justify-content: center; padding-top: 10px; border-top: 1px solid var(--panel-b); margin-top: 8px; }
 .mini-chip { font-size: 11px; background: var(--panel); border: 1px solid var(--panel-b); border-radius: 8px; padding: 4px 7px; font-weight: 700; }

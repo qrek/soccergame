@@ -447,6 +447,7 @@ function handleApi(req, res) {
     let msg;
     try { msg = JSON.parse(body || "{}"); } catch (_) { res.writeHead(400); return res.end("{}"); }
     const fn = ACTIONS[msg.type];
+    if (process.env.DEBUG) console.log("[api]", msg.type, JSON.stringify(msg).slice(0, 120));
     const result = fn ? fn(msg) : { ok: false, error: "Action inconnue." };
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(result || { ok: true }));

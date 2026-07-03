@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v23 — buteurs cohérents";
+  const APP_VERSION = "v24 — buts nets + ambiance";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -182,7 +182,7 @@
       const { roundIdx, rounds } = local.reveal;
       const cur = rounds[Math.min(roundIdx, rounds.length - 1)];
       snap.playing = { round: roundIdx + 1, totalRounds: rounds.length, stage: cur.stage, type: cur.type,
-        matches: cur.matches, startedAt: local.roundStartedAt, clockMs: 52000, goalHoldMs: 3500,
+        matches: cur.matches, startedAt: local.roundStartedAt, clockMs: 44000, goalHoldMs: 3500,
         playedMatches: rounds.slice(0, roundIdx).filter((r) => r.type === "league")
           .flatMap((r) => r.matches.map((m) => ({ a: m.a, b: m.b, ga: m.ga, gb: m.gb }))) };
     }
@@ -612,7 +612,7 @@
         if (t >= endT - 0.05) break;
         // passe (parfois interceptée)
         let rec, final = false;
-        if (steer && ev.shooter && t >= ev.m - 1.7) { rec = ev.shooter; final = true; }
+        if (steer && ev.shooter && t >= endT - 1.6) { rec = ev.shooter; final = true; }
         else if (!steer && rng() < 0.2) { poss = poss === "a" ? "b" : "a"; rec = nearestTo(outfield(poss), sb); }
         else {
           const mates = outfield(poss).filter((d) => d !== carrier);
@@ -625,22 +625,34 @@
         segs.push({ type: "pass", t0: t, t1: t + pd, c: rec.idx, from: sb, to: spot });
         sb = spot; t += pd; carrier = rec;
         if (final) {
-          if (t < ev.m - 0.06) segs.push({ type: "hold", t0: t, t1: ev.m - 0.06, c: rec.idx, to: { x: ev.x, y: ev.y } });
-          t = ev.m - 0.06; sb = { x: ev.x, y: ev.y };
+          if (t < endT) segs.push({ type: "hold", t0: t, t1: endT, c: rec.idx, to: { x: ev.x, y: ev.y } });
+          t = endT; sb = { x: ev.x, y: ev.y };
           return;
         }
       }
     }
 
+    const LEAD = 0.7; // durée de vol du tir (visible à l'écran)
     for (const ev of events) {
-      chainTo(ev.m - 0.06, ev);
+      chainTo(ev.m - LEAD - 0.05, ev);
+      // Garantie : le ballon DOIT être au point de tir, dans les pieds du
+      // tireur, avant la frappe — sinon passe corrective express.
+      const shooterDot = ev.shooter || nearestTo(outfield(ev.side), ev);
+      if (Math.hypot(sb.x - ev.x, sb.y - ev.y) > 4) {
+        const p0 = Math.max(0, Math.min(t, ev.m - LEAD - 0.4));
+        if (ev.m - LEAD - 0.05 > p0 + 0.05) {
+          segs.push({ type: "pass", t0: p0, t1: ev.m - LEAD - 0.05, c: shooterDot.idx, from: sb, to: { x: ev.x, y: ev.y } });
+        }
+        sb = { x: ev.x, y: ev.y }; t = ev.m - LEAD - 0.05; carrier = shooterDot; poss = ev.side;
+      }
+      if (t < ev.m - LEAD) { segs.push({ type: "hold", t0: t, t1: ev.m - LEAD, c: carrier.idx, to: sb }); t = ev.m - LEAD; }
       const right = ev.side === "a";
       let end;
       if (ev.type === "goal") end = { x: right ? 99.4 : 0.6, y: 29 + rng() * 6 };
       else if (ev.type === "saved") end = { x: right ? 96.6 : 3.4, y: 29.5 + rng() * 5 };
       else if (ev.type === "post") end = { x: right ? 98.6 : 1.4, y: rng() < 0.5 ? 26.4 : 37.6 };
       else end = { x: right ? 99.6 : 0.4, y: rng() < 0.5 ? 17 : 45 };
-      segs.push({ type: "shot", t0: Math.max(0, ev.m - 0.06), t1: ev.m, c: ev.shooter ? ev.shooter.idx : -1, from: sb, to: end, ev });
+      segs.push({ type: "shot", t0: Math.max(0, Math.min(t, ev.m - LEAD)), t1: ev.m, c: ev.shooter ? ev.shooter.idx : -1, from: { x: ev.x, y: ev.y }, to: end, ev });
       sb = end; t = ev.m;
       const defSide = right ? "b" : "a";
       poss = defSide;
@@ -673,6 +685,32 @@
     return `<pattern id="${id}" patternUnits="objectBoundingBox" patternContentUnits="objectBoundingBox" width="1" height="1">${inner}</pattern>`;
   }
 
+  // Commentaires d'ambiance (déterministes) pour habiller le fil du match.
+  function buildAmbient(match, rng) {
+    const an = match.an, bn = match.bn;
+    const sc45 = { ga: 0, gb: 0 };
+    (match.events || []).forEach((e) => { if (e.type === "goal" && e.m <= 45) { if (e.side === "a") sc45.ga++; else sc45.gb++; } });
+    const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+    const list = [
+      { m: 1, text: `🟢 Coup d'envoi ! ${pick([an, bn])} engage.` },
+      { m: 16 + Math.floor(rng() * 16), text: pick([
+        `⚔️ Le milieu de ${an} prend le contrôle du jeu.`,
+        `🔥 Quel rythme ! Ça se rend coup pour coup.`,
+        `🧱 ${bn} défend bas et guette le contre.`,
+        `🎯 ${an} fait circuler patiemment, ${bn} coulisse bien.`,
+      ]) },
+      { m: 45, text: `⏸️ Mi-temps : ${an} ${sc45.ga} - ${sc45.gb} ${bn}.` },
+      { m: 56 + Math.floor(rng() * 16), text: pick([
+        `📣 Le public pousse, l'intensité monte d'un cran !`,
+        `🔁 Ça s'organise sur les bancs, les consignes pleuvent.`,
+        `💨 ${bn} accélère sur les ailes, ça sent l'occasion.`,
+        `🥵 Les organismes fatiguent, des espaces s'ouvrent.`,
+      ]) },
+      { m: 83 + Math.floor(rng() * 5), text: `⏱️ Dernières minutes… tout peut encore arriver !` },
+    ];
+    return list;
+  }
+
   // Construit la scène (22 joueurs + ballon) et l'état de simulation.
   function buildSim(match) {
     const A = teamSetup(match.a, "a"), B = teamSetup(match.b, "b");
@@ -700,7 +738,8 @@
       <circle id="sim-ball" cx="50" cy="32" r="1.15" fill="#fff" stroke="rgba(0,0,0,.45)" stroke-width="0.3"/>
     </svg></div>`;
     dots.forEach((d, i) => { d.el = document.getElementById("sd" + i); });
-    return { dots, ballEl: document.getElementById("sim-ball"), segs: buildScript(match, dots, events, rng), events, segIdx: 0, lastNow: 0 };
+    return { dots, ballEl: document.getElementById("sim-ball"), segs: buildScript(match, dots, events, rng), events, segIdx: 0, lastNow: 0,
+      ambient: buildAmbient(match, mulberry(((match.a * 2654435761) ^ (match.b * 40503)) >>> 0)) };
   }
 
   // Une frame : segment actif, ballon au pied/en vol, courses plafonnées.
@@ -719,6 +758,8 @@
     if (mc.holding) {
       const ge = sim.events.find((e) => e.type === "goal" && e.m === mc.holding.m && e.side === mc.holding.side);
       if (ge && ge.shooter && ge.shooter.el) ge.shooter.el.setAttribute("r", (2 + Math.abs(Math.sin(mc.holdT * Math.PI * 3)) * 0.9).toFixed(2));
+      const gs = sim.segs.find((g) => g.type === "shot" && g.ev && g.ev.type === "goal" && g.ev.m === mc.holding.m && g.ev.side === mc.holding.side);
+      if (gs) { sim.ballEl.setAttribute("cx", gs.to.x.toFixed(2)); sim.ballEl.setAttribute("cy", gs.to.y.toFixed(2)); }
       return;
     }
 
@@ -849,9 +890,12 @@
         }
       } else if (ovEl) { ovEl.remove(); }
 
-      const evs = seen.slice().sort((a, b) => b.m - a.m);
+      const amb = (state.sim && state.sim.ambient ? state.sim.ambient : []).filter((c) => c.m <= mc.minute);
+      const lines = seen.map((e) => ({ m: e.m, cls: e.type === "goal" ? "goal" : "", text: e.text }))
+        .concat(amb.map((c) => ({ m: c.m, cls: "amb", text: c.text })))
+        .sort((a, b) => b.m - a.m);
       setHtml($("live-feed"),
-        evs.map((e) => `<div class="evline ${e.type === "goal" ? "goal" : ""}"><span class="min">${e.m}'</span><span class="etxt">${esc(e.text)}</span></div>`).join("")
+        lines.map((l) => `<div class="evline ${l.cls}"><span class="min">${l.m}'</span><span class="etxt">${esc(l.text)}</span></div>`).join("")
         || `<div class="evline"><span class="min">1'</span><span class="etxt">🟢 Coup d'envoi !</span></div>`);
     } else {
       const raw = Math.max(0, Math.min(90, Math.floor((elapsed / p.clockMs) * 90)));

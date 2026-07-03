@@ -19,7 +19,7 @@ const PLAYERS = RAW_PLAYERS.map((p, i) => ({ id: i, ...p }));
 const PORT = process.env.PORT || 3000;
 const TURN_SECONDS = 10;
 const SQUAD_SIZE = 11; // toutes les équipes ont 11 joueurs
-const MATCH_MS = parseInt(process.env.MATCH_MS, 10) || 52000;      // durée du direct d'une journée (0' -> 90')
+const MATCH_MS = parseInt(process.env.MATCH_MS, 10) || 44000;      // durée du direct d'une journée (0' -> 90')
 const PAUSE_MS = parseInt(process.env.PAUSE_MS, 10) || 7000;       // pause score final avant la journée suivante
 const GOAL_HOLD_MS = parseInt(process.env.GOAL_HOLD_MS, 10) || 3500; // l'horloge se fige sur chaque but (célébration)
 const REROLLS = 2; // relances d'équipe par joueur pendant le draft

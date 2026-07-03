@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v16 — classement live";
+  const APP_VERSION = "v17 — mon équipe en surbrillance";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -449,9 +449,9 @@
       $("live-card").innerHTML = `
         <div class="lc-stage">${esc(p.stage)} · ${mine ? "TON MATCH" : "MATCH VEDETTE"} <span class="live-min" id="live-min">0'</span></div>
         <div class="lc-row">
-          <span class="lc-team"><span class="lc-kit">${kitSvg(kitOf(featured.a))}</span><span class="lc-tname">${esc(featured.an)}</span></span>
+          <span class="lc-team ${featured.a === state.pid ? "me" : ""}"><span class="lc-kit">${kitSvg(kitOf(featured.a))}</span><span class="lc-tname">${esc(featured.an)}</span></span>
           <span class="lc-score"><span id="live-ga">0</span> - <span id="live-gb">0</span></span>
-          <span class="lc-team"><span class="lc-kit">${kitSvg(kitOf(featured.b))}</span><span class="lc-tname">${esc(featured.bn)}</span></span>
+          <span class="lc-team ${featured.b === state.pid ? "me" : ""}"><span class="lc-kit">${kitSvg(kitOf(featured.b))}</span><span class="lc-tname">${esc(featured.bn)}</span></span>
         </div>
         <div class="lc-pens" id="live-pens" style="display:none"></div>`;
     } else {
@@ -680,10 +680,11 @@
       const omc = matchClock(elapsed, goalsOf(m), p.clockMs, hold);
       const sc = scoreAt(m, omc.minute);
       const lastGoal = goalsOf(m).filter((e) => e.m <= omc.minute).pop();
-      return `<div class="match">
-        <span class="side"><span class="kit-tag">${kitSvg(kitOf2(m.a))}</span><span>${esc(m.an)}</span></span>
+      const isMine = m.a === state.pid || m.b === state.pid;
+      return `<div class="match ${isMine ? "mymatch" : ""}">
+        <span class="side"><span class="kit-tag">${kitSvg(kitOf2(m.a))}</span><span class="${m.a === state.pid ? "me" : ""}">${esc(m.an)}</span></span>
         <span class="score">${sc.ga}-${sc.gb}${omc.ft && m.pens ? `<span class="pens"> (${m.pens.pa}-${m.pens.pb})</span>` : ""}</span>
-        <span class="side" style="justify-content:flex-end"><span>${esc(m.bn)}</span><span class="kit-tag">${kitSvg(kitOf2(m.b))}</span></span>
+        <span class="side" style="justify-content:flex-end"><span class="${m.b === state.pid ? "me" : ""}">${esc(m.bn)}</span><span class="kit-tag">${kitSvg(kitOf2(m.b))}</span></span>
       </div>${lastGoal && !omc.ft ? `<div class="mplex-last">⚽ ${lastGoal.m}' ${esc(lastGoal.scorer)}</div>` : ""}`;
     }).join(""));
 
@@ -950,7 +951,7 @@
     const K = t.standings.length >= 8 ? 8 : t.standings.length >= 4 ? 4 : 2;
     $("tab-table").innerHTML = `<table class="ltable">
       <tr><th>#</th><th>Équipe</th><th>J</th><th>V</th><th>N</th><th>D</th><th>Diff</th><th>Pts</th></tr>
-      ${t.standings.map((r, i) => `<tr class="${i < K ? "qualif" : ""}">
+      ${t.standings.map((r, i) => `<tr class="${i < K ? "qualif" : ""} ${r.id === state.pid ? "meline" : ""}">
         <td class="rk">${i + 1}</td><td class="tname">${esc(r.name)}${r.id === state.pid ? '<span class="you-tag">TOI</span>' : ""}</td>
         <td>${r.played}</td><td>${r.w}</td><td>${r.d}</td><td>${r.l}</td>
         <td>${r.gd > 0 ? "+" : ""}${r.gd}</td><td class="pts">${r.pts}</td></tr>`).join("")}</table>

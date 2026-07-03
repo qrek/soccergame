@@ -384,3 +384,11 @@ body {
 
 /* Ligne du classement live me concernant */
 .ltable tr.meline td { color: var(--accent); }
+
+/* Mon équipe en surbrillance : score, multiplex, classements */
+.lc-team.me .lc-tname { color: var(--accent); text-shadow: 0 0 14px rgba(0, 255, 135, .45); }
+.lc-team.me .lc-kit { filter: drop-shadow(0 0 7px rgba(0, 255, 135, .55)); }
+.match.mymatch { border: 1px solid rgba(0, 255, 135, .38); background: rgba(0, 255, 135, .06); }
+.match .side .me { color: var(--accent); font-weight: 900; }
+.ltable tr.meline { background: rgba(0, 255, 135, .09); }
+.ltable tr.meline td { color: var(--accent); }

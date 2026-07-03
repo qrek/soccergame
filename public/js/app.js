@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v21 — maillots sur le terrain";
+  const APP_VERSION = "v22 — moteur FM affiné";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -621,7 +621,7 @@
           rec = mates[Math.floor(rng() * Math.min(3, mates.length))] || carrier;
         }
         const spot = final ? { x: ev.x, y: ev.y } : spotFor(rec, steer && ev ? ev : sb);
-        const pd = clampV(Math.hypot(spot.x - sb.x, spot.y - sb.y) / 55, 0.18, 0.5);
+        const pd = clampV(Math.hypot(spot.x - sb.x, spot.y - sb.y) / 28, 0.35, 0.9);
         segs.push({ type: "pass", t0: t, t1: t + pd, c: rec.idx, from: sb, to: spot });
         sb = spot; t += pd; carrier = rec;
         if (final) {
@@ -651,8 +651,8 @@
       } else {
         carrier = ev.type === "post" ? nearestTo(outfield(poss), sb) : gkOf(poss);
         const cs = { x: carrier.home.x, y: carrier.home.y };
-        segs.push({ type: "pass", t0: t, t1: t + 0.35, c: carrier.idx, from: sb, to: cs });
-        sb = cs; t += 0.35;
+        segs.push({ type: "pass", t0: t, t1: t + 0.55, c: carrier.idx, from: sb, to: cs });
+        sb = cs; t += 0.55;
         segs.push({ type: "hold", t0: t, t1: t + 0.8, c: carrier.idx, to: cs });
         t += 0.8;
       }
@@ -743,21 +743,43 @@
       const q = Math.hypot(d.x - bx, d.y - by);
       if (q < best) { best = q; presser = d; }
     }
+    // soutiens : les 2 coéquipiers les plus proches proposent une solution
+    let sup1 = null, sup2 = null;
+    if (holder && seg.type === "hold") {
+      const mates = sim.dots.filter((d) => d.side === holder.side && d !== holder && d.pos !== "GK")
+        .sort((u, v) => Math.hypot(u.x - holder.x, u.y - holder.y) - Math.hypot(v.x - holder.x, v.y - holder.y));
+      sup1 = mates[0] || null; sup2 = mates[1] || null;
+    }
+    // anticipation : le futur receveur part déjà vers son point de chute
+    const nextSeg = sim.segs[sim.segIdx + 1];
+    const anticip = seg.type === "hold" && nextSeg && nextSeg.type === "pass" ? sim.dots[nextSeg.c] : null;
 
     for (const d of sim.dots) {
-      const shiftK = d.pos === "MID" ? 0.16 : d.pos === "FWD" ? 0.13 : 0.10;
-      let tx = d.home.x + clampV((bx - d.home.x) * shiftK, -9, 9);
-      let ty = d.home.y + clampV((by - d.home.y) * shiftK, -6, 6);
-      let sp = 3.8; // marche/replacement
+      const shiftK = d.pos === "MID" ? 0.22 : d.pos === "FWD" ? 0.20 : 0.15;
+      let tx = d.home.x + clampV((bx - d.home.x) * shiftK, -12, 12);
+      let ty = d.home.y + clampV((by - d.home.y) * shiftK, -8, 8);
+      let sp = 4.5; // replacement
       if (d.pos === "GK") {
         tx = d.home.x; ty = clampV(32 + (by - 32) * 0.25, 25, 39); sp = 5;
         if (seg.type === "shot" && seg.ev && d.side !== seg.ev.side) { ty = clampV(seg.to.y, 25.5, 38.5); sp = 16; }
       } else if (seg.type === "hold" && d === holder) { tx = seg.to.x; ty = seg.to.y; sp = 6; }
       else if (seg.type === "pass" && d === holder) { tx = seg.to.x; ty = seg.to.y; sp = 11; }
       else if (d === presser) { tx = bx + (d.x - bx) * 0.1; ty = by + (d.y - by) * 0.1; sp = 9; }
+      else if (d === anticip) { tx = nextSeg.to.x; ty = nextSeg.to.y; sp = 6.5; }
+      else if (d === sup1 || d === sup2) {
+        const dir = holder.side === "a" ? 1 : -1;
+        tx = clampV(holder.x + dir * (d === sup1 ? 9 : -5), 3, 97);
+        ty = clampV(holder.y + (d === sup1 ? -7 : 7), 4, 60);
+        sp = 6;
+      } else if (holder && d.side === possSide && d.pos === "FWD" && ((possSide === "a" && bx > 62) || (possSide === "b" && bx < 38))) {
+        // les attaquants plongent vers la surface quand le ballon approche
+        tx = d.home.x + (possSide === "a" ? 14 : -14);
+        ty = d.home.y + (32 - d.home.y) * 0.25;
+        sp = 5.5;
+      }
       // micro-flottement (à l'arrêt, personne n'est une statue)
-      tx += Math.sin((now / 1000) * d.w1 + d.ph1) * 0.6;
-      ty += Math.cos((now / 1000) * d.w2 + d.ph2) * 0.5;
+      tx += Math.sin((now / 1000) * d.w1 + d.ph1) * 0.9;
+      ty += Math.cos((now / 1000) * d.w2 + d.ph2) * 0.8;
       const dx = tx - d.x, dy = ty - d.y, dist = Math.hypot(dx, dy) || 0.0001;
       const step = Math.min(dist, sp * dt);
       d.x = clampV(d.x + (dx / dist) * step, 2.5, 97.5);

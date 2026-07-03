@@ -85,7 +85,8 @@
     const all = rawA.concat(rawB).map((ev) => {
       const attackRight = ev.side === "a";
       const goalish = ev.type === "goal" || ev.type === "post";
-      const x = attackRight ? (goalish ? 82 + rng() * 12 : 62 + rng() * 28) : (goalish ? 6 + rng() * 12 : 10 + rng() * 28);
+      // Les tirs partent des abords de la surface (fini les frappes de 40 m).
+      const x = attackRight ? (goalish ? 82 + rng() * 12 : 72 + rng() * 20) : (goalish ? 6 + rng() * 12 : 8 + rng() * 20);
       const y = 18 + rng() * 64;
       return Object.assign(ev, { m: 1 + Math.floor(rng() * 89), x: Math.round(x), y: Math.round(y) });
     });

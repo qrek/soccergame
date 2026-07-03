@@ -10,7 +10,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const engine = require("./game/engine");
+const engine = require("./public/js/engine.js");
 const MODEL = require("./public/js/model.js");
 
 const RAW_PLAYERS = require("./public/data/players.js");
@@ -162,28 +162,7 @@ function prepareTurn(room) {
   const drafter = playerByPid(room, d.currentPid);
   const drafted = draftedIds(room);
   const need = neededPositions(room, drafter);
-  const neededPos = new Set(Object.keys(need));
-
-  const byCountry = new Map();
-  for (const p of PLAYERS) {
-    if (drafted.has(p.id)) continue;
-    if (!byCountry.has(p.c)) byCountry.set(p.c, []);
-    byCountry.get(p.c).push(p);
-  }
-
-  let candidates = [...byCountry.entries()].filter(([, list]) => list.some((p) => neededPos.has(p.pos)));
-  let relaxed = false;
-  if (candidates.length === 0) {
-    candidates = [...byCountry.entries()].filter(([, list]) => list.length > 0);
-    relaxed = true;
-  }
-
-  const [country, list] = candidates[Math.floor(Math.random() * candidates.length)];
-  const options = list
-    .map((p) => ({ ...p, eligible: relaxed || neededPos.has(p.pos) }))
-    .sort((a, b) => b.r - a.r);
-
-  d.currentTeam = { country, code: list[0].code, options, relaxed };
+  d.currentTeam = engine.drawTeamForTurn(PLAYERS, drafted, new Set(Object.keys(need)));
   d.deadline = Date.now() + TURN_SECONDS * 1000;
   scheduleAutoPick(room);
   broadcast(room);
@@ -199,7 +178,7 @@ function scheduleAutoPick(room) {
 function autoPick(room) {
   const d = room.draft;
   if (!d || !d.currentTeam) return;
-  const pick = d.currentTeam.options.find((o) => o.eligible) || d.currentTeam.options[0];
+  const pick = d.currentTeam.options.find((o) => o.eligible) || d.currentTeam.options.find((o) => !o.taken);
   if (pick) applyPick(room, d.currentPid, pick.id, true);
 }
 
@@ -224,68 +203,18 @@ function applyPick(room, pid, playerId, auto) {
 }
 
 // ---------------------------------------------------------------------------
-// Tournoi
+// Tournoi (logique partagée dans engine.js)
 // ---------------------------------------------------------------------------
-const seedFor = (a, b, salt) => ((a * 73856093) ^ (b * 19349663) ^ (salt * 83492791)) >>> 0;
-
 function finishDraft(room) {
   room.phase = "results";
   clearTimeout(room.turnTimer);
-
   const teams = room.players.map((p) => {
     const sp = squadPlayers(room, p);
     const chem = MODEL.chemistry(sp, p.formationKey);
     return { id: p.pid, name: p.teamName || p.name, players: sp, bonus: chem.bonus, chem: chem.teamChem };
   });
-  const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));
-
-  const rounds = engine.roundRobin(teams.map((t) => t.id));
-  const matches = [];
-  rounds.forEach((round, ri) => {
-    round.forEach(([a, b]) => {
-      const res = engine.simulateMatch(teamById[a], teamById[b], seedFor(a, b, ri + 1));
-      matches.push({ a, b, ga: res.ga, gb: res.gb, round: ri + 1, events: res.events });
-    });
-  });
-  const standings = engine.computeStandings(teams, matches);
-
-  const N = teams.length;
-  const K = N >= 8 ? 8 : N >= 4 ? 4 : N >= 2 ? 2 : 0;
-  const knockout = buildKnockout(standings, teamById, K);
-
-  room.tournament = {
-    standings: standings.map((s) => ({ ...s, name: teamById[s.id].name })),
-    matches: matches.map((m) => ({ ...m, an: teamById[m.a].name, bn: teamById[m.b].name })),
-    knockout,
-    champion: knockout ? knockout.champion :
-      (standings[0] ? { id: standings[0].id, name: teamById[standings[0].id].name } : null),
-  };
+  room.tournament = engine.runTournament(teams);
   broadcast(room);
-}
-
-function buildKnockout(standings, teamById, K) {
-  if (K < 2) return null;
-  const seeds = standings.slice(0, K).map((s) => s.id);
-  const nameOf = (id) => teamById[id].name;
-  const pairMaps = { 2: [[0, 1]], 4: [[0, 3], [1, 2]], 8: [[0, 7], [3, 4], [1, 6], [2, 5]] };
-
-  let current = pairMaps[K].map(([i, j]) => [seeds[i], seeds[j]]);
-  const roundsOut = [];
-  let salt = 100;
-  while (current.length >= 1) {
-    const roundMatches = [];
-    const winners = [];
-    for (const [a, b] of current) {
-      const res = engine.simulateKnockout(teamById[a], teamById[b], seedFor(a, b, salt++));
-      roundMatches.push({ a, b, an: nameOf(a), bn: nameOf(b), ga: res.ga, gb: res.gb, pens: res.pens, winner: res.winner, events: res.events });
-      winners.push(res.winner);
-    }
-    roundsOut.push(roundMatches);
-    if (winners.length === 1) return { rounds: roundsOut, champion: { id: winners[0], name: nameOf(winners[0]) } };
-    current = [];
-    for (let i = 0; i < winners.length; i += 2) current.push([winners[i], winners[i + 1]]);
-  }
-  return { rounds: roundsOut, champion: null };
 }
 
 // ---------------------------------------------------------------------------

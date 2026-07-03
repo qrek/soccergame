@@ -24,6 +24,8 @@
           <input id="home-code" class="field code-input" maxlength="4" placeholder="CODE" autocomplete="off" />
           <button class="btn btn-ghost" id="btn-join">Rejoindre</button>
         </div>
+        <div class="or">ou</div>
+        <button class="btn btn-ghost btn-wide" id="btn-local">📱 Jouer à plusieurs sur ce téléphone</button>
         <p class="hint" id="home-error"></p>
       </div>
       <footer class="home-foot">Multijoueur temps réel</footer>
@@ -36,14 +38,23 @@
         <span class="room-pill">Session <b id="lobby-code">----</b></span>
       </header>
       <div class="lobby-body">
-        <div class="qr-card">
+        <div class="qr-card" id="qr-card">
           <div id="qr-holder"></div>
           <div class="qr-code">Code : <b id="lobby-code-big">----</b></div>
           <div class="qr-note">Scanne le QR ou saisis le code pour rejoindre</div>
         </div>
 
+        <!-- Mode 1 téléphone : ajout des joueurs locaux -->
+        <div class="config" id="local-setup" style="display:none">
+          <div class="config-title">📱 Mode 1 téléphone — qui joue ?</div>
+          <div class="join-row">
+            <input id="local-name" class="field" maxlength="16" placeholder="Nom du joueur" autocomplete="off" />
+            <button class="btn btn-ghost" id="btn-local-add">Ajouter</button>
+          </div>
+        </div>
+
         <!-- Personnalisation du club -->
-        <div class="config club-config">
+        <div class="config club-config" id="club-config">
           <div class="config-title">Ton club</div>
           <div class="club-row">
             <div id="kit-preview" class="kit-preview"></div>
@@ -58,7 +69,7 @@
         </div>
 
         <!-- Formation -->
-        <div class="config">
+        <div class="config" id="formation-config">
           <div class="config-title">Formation</div>
           <div class="formation-picker" id="formation-picker"></div>
         </div>
@@ -126,6 +137,7 @@
 
   <script src="js/qrcode.js"></script>
   <script src="js/model.js"></script>
+  <script src="js/engine.js"></script>
   <script src="data/players.js"></script>
   <script src="js/app.js"></script>
 </body>

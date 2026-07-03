@@ -45,7 +45,8 @@
     opts = opts || {};
     const stats = MODEL.computeStats(pl); // PAC/SHO/PAS/DRI/DEF/PHY (ou stats GK)
     const statsHtml = stats.map((s) => `<span class="cell"><b>${s.value}</b><i>${s.label}</i></span>`).join("");
-    return `<div class="fut ${tierClass(pl.r)} ${opts.disabled ? "disabled" : ""}" data-id="${pl.id}">
+    return `<div class="fut ${tierClass(pl.r)} ${pl.taken ? "taken" : opts.disabled ? "disabled" : ""}" data-id="${pl.id}">
+      ${pl.taken ? '<span class="taken-badge">PRIS</span>' : ""}
       <div class="fut-inner">
         <div class="fut-top">
           <div class="fut-rating"><span class="r">${pl.r}</span><span class="p">${pl.pos}</span></div>
@@ -59,14 +60,115 @@
 
   // ---------- Réseau ----------
   async function api(type, extra) {
+    if (local.active) return localApi(type, extra || {});
     try {
       const res = await fetch("api", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(Object.assign({ type, code: state.code, pid: state.pid }, extra || {})) });
-      if (!res.ok) return { ok: false, error: "Erreur serveur (" + res.status + ")." };
+      if (!res.ok) {
+        return { ok: false, error: res.status === 404 || res.status === 405
+          ? "Cet hébergement est statique (pas de serveur de jeu) : le multijoueur par code/QR nécessite `node server.js`. Utilise le mode « 1 téléphone » ci-dessous 👇"
+          : "Erreur serveur (" + res.status + ")." };
+      }
       return await res.json();
     } catch (e) {
-      return { ok: false, error: "Serveur injoignable — lance `node server.js` et ouvre l'adresse qu'il affiche." };
+      return { ok: false, error: "Serveur injoignable — lance `node server.js` et ouvre l'adresse qu'il affiche, ou joue en mode « 1 téléphone » 👇" };
     }
+  }
+
+  // ---------- Mode « 1 téléphone » (pass & play, 100 % local) ----------
+  const local = { active: false, players: [], nextPid: 1, phase: "lobby", draft: null, tournament: null };
+  const LPLAYERS = (typeof PLAYERS !== "undefined" ? PLAYERS : []).map((p, i) => Object.assign({ id: i }, p));
+
+  function localAddPlayer(name) {
+    if (local.players.length >= 8) return;
+    const i = local.players.length;
+    local.players.push({
+      pid: local.nextPid++, name: String(name || "Joueur " + (i + 1)).slice(0, 16),
+      squad: [], formationKey: "4-3-3",
+      kit: { p: KIT_PALETTE[i % KIT_PALETTE.length], s: "#ffffff", pat: PATTERNS[i % PATTERNS.length] },
+    });
+  }
+
+  const localDrafted = () => { const s = new Set(); local.players.forEach((p) => p.squad.forEach((x) => s.add(x.id))); return s; };
+  function localNeeded(p) {
+    const counts = MODEL.positionCounts(p.formationKey);
+    const have = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+    p.squad.forEach((x) => have[x.pos]++);
+    const need = {};
+    for (const pos of ["GK", "DEF", "MID", "FWD"]) { const r = counts[pos] - have[pos]; if (r > 0) need[pos] = r; }
+    return need;
+  }
+
+  function localSnapshot() {
+    const players = local.players.map((p) => {
+      const chem = MODEL.chemistry(p.squad, p.formationKey);
+      return { pid: p.pid, name: p.name, connected: true, isHost: p.pid === 1, formationKey: p.formationKey,
+        teamName: p.name, kit: p.kit, squad: p.squad, squadCount: p.squad.length,
+        strength: ENGINE.teamStrength(p.squad), chem: chem.teamChem, chemBonus: chem.bonus };
+    });
+    const snap = { code: "LOCAL", phase: local.phase, hostPid: 1, squadSize: 11, players };
+    if (local.phase === "draft" && local.draft) {
+      const d = local.draft;
+      const cur = local.players.find((p) => p.pid === d.currentPid);
+      snap.draft = { pickNum: d.pickNum + 1, totalPicks: d.order.length, currentPid: d.currentPid,
+        currentName: cur.name, round: Math.floor(d.pickNum / local.players.length) + 1,
+        team: d.currentTeam, needed: localNeeded(cur), deadline: 0 };
+    }
+    if (local.phase === "results") snap.tournament = local.tournament;
+    return snap;
+  }
+
+  function localRender() {
+    state.snap = localSnapshot();
+    state.pid = local.phase === "draft" && local.draft ? local.draft.currentPid : 1;
+    render();
+  }
+
+  function localPrepareTurn() {
+    const d = local.draft;
+    d.currentPid = d.order[d.pickNum];
+    const cur = local.players.find((p) => p.pid === d.currentPid);
+    d.currentTeam = ENGINE.drawTeamForTurn(LPLAYERS, localDrafted(), new Set(Object.keys(localNeeded(cur))));
+  }
+
+  function localStart() {
+    local.players.forEach((p) => { p.squad = []; });
+    const pids = local.players.map((p) => p.pid);
+    const order = [];
+    for (let r = 0; r < 11; r++) order.push(...(r % 2 === 0 ? pids : pids.slice().reverse()));
+    local.draft = { order, pickNum: 0, currentPid: order[0], currentTeam: null };
+    local.phase = "draft";
+    localPrepareTurn();
+    localRender();
+  }
+
+  function localPick(playerId) {
+    const d = local.draft;
+    if (!d) return;
+    const opt = d.currentTeam.options.find((o) => o.id === playerId);
+    if (!opt || !opt.eligible || localDrafted().has(playerId)) return;
+    const cur = local.players.find((p) => p.pid === d.currentPid);
+    cur.squad.push(LPLAYERS[playerId]);
+    d.pickNum++;
+    if (d.pickNum >= d.order.length) {
+      local.phase = "results";
+      const teams = local.players.map((p) => {
+        const chem = MODEL.chemistry(p.squad, p.formationKey);
+        return { id: p.pid, name: p.name, players: p.squad, bonus: chem.bonus, chem: chem.teamChem };
+      });
+      local.tournament = ENGINE.runTournament(teams);
+    } else {
+      localPrepareTurn();
+    }
+    localRender();
+  }
+
+  function localApi(type, extra) {
+    if (type === "startGame") { if (local.players.length >= 2) localStart(); }
+    else if (type === "pick") localPick(extra.playerId);
+    else if (type === "playAgain") { local.phase = "lobby"; local.draft = null; local.tournament = null; local.players.forEach((p) => { p.squad = []; }); localRender(); }
+    else if (type === "setFormation") { const p = local.players.find((x) => x.pid === state.pid); if (p && MODEL.FORMATIONS[extra.formationKey]) { p.formationKey = extra.formationKey; localRender(); } }
+    return Promise.resolve({ ok: true });
   }
 
   function connect() {
@@ -99,6 +201,22 @@
     if (r.ok) { state.code = r.code; state.pid = r.pid; saveSession(); connect(); } else $("home-error").textContent = r.error || "Erreur";
   });
   $("home-code").addEventListener("input", (e) => { e.target.value = e.target.value.toUpperCase(); });
+
+  // Mode 1 téléphone : activation + ajout de joueurs
+  $("btn-local").addEventListener("click", () => {
+    local.active = true;
+    const first = $("home-name").value.trim();
+    if (first) localAddPlayer(first);
+    localRender();
+  });
+  $("btn-local-add").addEventListener("click", () => {
+    const name = $("local-name").value.trim();
+    if (!name) return;
+    localAddPlayer(name);
+    $("local-name").value = "";
+    localRender();
+  });
+  $("local-name").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btn-local-add").click(); });
 
   // ---------- Lobby : club / maillot / formation ----------
   $("team-name").addEventListener("input", (e) => {
@@ -144,9 +262,29 @@
   // ---------- Lobby ----------
   let qrDrawn = null;
   function renderLobby(s) {
-    $("lobby-code").textContent = s.code;
+    const isLocal = s.code === "LOCAL";
+    $("lobby-code").textContent = isLocal ? "📱" : s.code;
     $("lobby-code-big").textContent = s.code;
     $("lobby-count").textContent = s.players.length;
+
+    // Mode 1 téléphone : pas de QR ni de personnalisation individuelle.
+    $("qr-card").style.display = isLocal ? "none" : "";
+    $("club-config").style.display = isLocal ? "none" : "";
+    $("formation-config").style.display = isLocal ? "none" : "";
+    $("local-setup").style.display = isLocal ? "" : "none";
+    if (isLocal) {
+      $("lobby-players").innerHTML = s.players.map((p) => `
+        <li><div class="kit-mini">${kitSvg(p.kit)}</div>
+          <div class="pinfo"><div class="pteam">${esc(p.name)}</div><div class="pmgr">${p.formationKey}</div></div></li>`).join("");
+      const startBtn = $("btn-start");
+      startBtn.style.display = "";
+      startBtn.disabled = s.players.length < 2;
+      $("lobby-hint").textContent = s.players.length < 2
+        ? "Ajoute au moins 2 joueurs pour lancer le draft."
+        : `${s.players.length} joueurs — on se passe le téléphone à chaque tour.`;
+      return;
+    }
+
     if (qrDrawn !== s.code) {
       // Le QR est limité à ~106 octets : si l'URL est trop longue, on affiche
       // seulement le code au lieu de faire échouer tout le rendu du lobby.
@@ -201,8 +339,11 @@
     $("draft-pick").textContent = d.pickNum;
     $("draft-total").textContent = d.totalPicks;
 
+    const isLocal = s.code === "LOCAL";
     $("turn-banner").classList.toggle("mine", myTurn);
-    $("turn-text").innerHTML = myTurn ? "🎯 <b>À toi de jouer</b> — choisis un joueur" : `Au tour de <b>${esc(d.currentName)}</b>…`;
+    $("turn-text").innerHTML = isLocal
+      ? `📱 Au tour de <b>${esc(d.currentName)}</b> — passe-lui le téléphone !`
+      : (myTurn ? "🎯 <b>À toi de jouer</b> — choisis un joueur" : `Au tour de <b>${esc(d.currentName)}</b>…`);
     $("team-flag").textContent = flag(d.team.code);
     $("draft-team-name").textContent = d.team.country;
 
@@ -218,7 +359,9 @@
       `<span class="mini-chip">${p.pos} ${esc(p.n.split(" ").slice(-1)[0])} <span class="mr">${p.r}</span></span>`).join("")
       || '<span class="mini-chip">Ton effectif se remplira ici</span>';
 
-    startTimer(d.deadline);
+    // Pas de chrono en mode 1 téléphone : chacun prend son temps.
+    $("draft-timer").style.display = d.deadline ? "" : "none";
+    if (d.deadline) startTimer(d.deadline); else clearInterval(timerInterval);
   }
 
   $("cards-grid").addEventListener("click", (e) => {
@@ -436,6 +579,23 @@
     }
     // Hook de test : simule un clic réel sur « Créer une session ».
     if (params.has("autocreate")) { document.body.classList.add("no-anim"); setTimeout(() => $("btn-create").click(), 200); return; }
+    // Hook de test : mode 1 téléphone (lobby | draft | full).
+    const autolocal = params.get("autolocal");
+    if (autolocal) {
+      document.body.classList.add("no-anim");
+      local.active = true;
+      ["Théo", "Bob", "Carol"].forEach((n) => localAddPlayer(n));
+      if (autolocal === "lobby") { localRender(); return; }
+      localStart();
+      if (autolocal === "full") {
+        const iv = setInterval(() => {
+          if (local.phase !== "draft") { clearInterval(iv); return; }
+          const opt = local.draft.currentTeam.options.find((o) => o.eligible);
+          if (opt) localPick(opt.id);
+        }, 25);
+      }
+      return;
+    }
 
     const roomParam = (params.get("room") || params.get("code") || "").toUpperCase();
     if (roomParam) $("home-code").value = roomParam;

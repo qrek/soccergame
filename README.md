@@ -34,6 +34,24 @@ pointe automatiquement vers l'URL de la session.
 
 Variable d'environnement optionnelle : `PORT` (par défaut `3000`).
 
+## Deux modes de jeu
+
+| Mode | Fonctionnement | Hébergement requis |
+|---|---|---|
+| **Multi-téléphones** (code / QR) | Chaque joueur rejoint depuis son téléphone | Serveur Node (`node server.js`) : machine locale, Render, Railway, Fly.io… |
+| **1 téléphone** (pass & play) | On se passe le téléphone à chaque tour de draft | **Aucun serveur** — fonctionne sur n'importe quel hébergement statique |
+
+⚠️ **Vercel, Netlify, GitHub Pages… ne servent que les fichiers statiques** : le
+serveur (`server.js`, sessions, temps réel) n'y tourne pas, donc la création de
+session par code/QR y répond 404. Sur ces plateformes, seul le mode
+**« 1 téléphone »** est disponible (bouton dédié sur l'accueil). Pour le
+multijoueur par QR, hébergez `node server.js` sur un service qui exécute Node
+(Render et Railway ont un palier gratuit : « New Web Service » → repo →
+commande `node server.js`).
+
+Note Vercel : si vous déployez le dossier tel quel, définissez le répertoire de
+sortie sur `public/`.
+
 ## Architecture
 
 | Fichier | Rôle |

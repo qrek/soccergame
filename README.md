@@ -54,20 +54,5 @@ sur 99 (à son apogée en sélection), façon note générale FIFA, avec 6 stati
 détaillées calculées (PAC/SHO/PAS/DRI/DEF/PHY, ou DIV/HAN/KIC/REF/SPD/POS pour les
 gardiens). Elle est facilement extensible dans `public/data/players.js`.
 
-## Photos des joueurs
-
-Chaque carte tente de charger `public/photos/<id>.jpg` (l'`id` = index du joueur
-dans `players.js`). En l'absence de fichier, un **avatar généré** (dégradé +
-initiales) est affiché — le jeu reste donc pleinement fonctionnel sans photos.
-
-Pour récupérer de **vraies photos** (depuis Wikipédia, source libre), lancez sur
-une machine avec accès Internet :
-
-```bash
-node tools/fetch-photos.js          # remplit public/photos/<id>.jpg
-node tools/fetch-photos.js --force  # force le retéléchargement
-```
-
-> Remarque : l'environnement cloud de développement bloque l'accès aux sites
-> externes (Wikipedia, sofifa, futbin…), les photos ne peuvent donc pas y être
-> téléchargées ; ce script est prévu pour être exécuté localement.
+Chaque carte affiche un avatar généré (dégradé déterministe + initiales du
+joueur) — aucun téléchargement externe n'est nécessaire.

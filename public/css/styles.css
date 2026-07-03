@@ -1,17 +1,17 @@
 /* ================= Football Draft — UI façon FIFA Ultimate Team ================= */
 :root {
-  --bg: #04121f;
-  --panel: rgba(255, 255, 255, 0.06);
-  --panel-b: rgba(255, 255, 255, 0.12);
-  --accent: #00e6c3;
-  --accent2: #14a0ff;
+  --bg: #0a0d0b;
+  --panel: rgba(255, 255, 255, 0.05);
+  --panel-b: rgba(255, 255, 255, 0.11);
+  --accent: #00ff87;   /* vert "volt" façon EA FC / FIFA */
+  --accent2: #00c86a;
   --gold-a: #f8e79a;
   --gold-b: #c9971f;
-  --text: #eaf6ff;
-  --muted: #8aa3ba;
+  --text: #eefdf4;
+  --muted: #8fa89a;
   --danger: #ff5470;
-  --ok: #37e29a;
-  --shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+  --ok: #00ff87;
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -20,8 +20,8 @@ body {
   font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
   color: var(--text);
   background:
-    radial-gradient(1200px 600px at 50% -10%, #123a63 0%, transparent 60%),
-    radial-gradient(900px 500px at 90% 110%, #0c2f4d 0%, transparent 55%),
+    radial-gradient(1200px 600px at 50% -10%, #12291c 0%, transparent 60%),
+    radial-gradient(900px 500px at 90% 110%, #0d2417 0%, transparent 55%),
     var(--bg);
   overflow-x: hidden;
   user-select: none;
@@ -35,8 +35,8 @@ body {
 /* ---------- Boutons / champs ---------- */
 .btn { border: none; border-radius: 14px; padding: 15px 18px; font-size: 16px; font-weight: 800; cursor: pointer; width: 100%; letter-spacing: .3px; transition: transform .1s, filter .2s; }
 .btn:active { transform: scale(.97); }
-.btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #03222b; box-shadow: 0 8px 22px rgba(0, 230, 195, .3); }
-.btn-primary:disabled { background: #2b4258; color: #6d8299; box-shadow: none; cursor: not-allowed; }
+.btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #04150c; box-shadow: 0 8px 22px rgba(0, 255, 135, .25); }
+.btn-primary:disabled { background: #22302a; color: #6d8479; box-shadow: none; cursor: not-allowed; }
 .btn-ghost { background: var(--panel); color: var(--text); border: 1px solid var(--panel-b); width: auto; padding: 15px 20px; }
 .field { width: 100%; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--panel-b); background: rgba(0, 0, 0, .28); color: var(--text); font-size: 16px; outline: none; text-align: center; }
 .field:focus { border-color: var(--accent); }
@@ -61,7 +61,7 @@ body {
 .brand { font-weight: 900; letter-spacing: 1px; font-size: 18px; }
 .room-pill, .draft-progress { background: var(--panel); border: 1px solid var(--panel-b); padding: 7px 12px; border-radius: 20px; font-size: 13px; }
 .room-pill b { color: var(--accent); letter-spacing: 2px; }
-.timer { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #03222b; font-weight: 900; border-radius: 50%; width: 38px; height: 38px; display: grid; place-items: center; font-size: 15px; }
+.timer { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #04150c; font-weight: 900; border-radius: 50%; width: 38px; height: 38px; display: grid; place-items: center; font-size: 15px; }
 .timer.warn { background: linear-gradient(135deg, #ff9f43, var(--danger)); animation: pulse .7s infinite; }
 @keyframes pulse { 50% { transform: scale(1.12); } }
 
@@ -94,7 +94,7 @@ body {
 /* Formation */
 .formation-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .formation-picker button { padding: 12px 0; border-radius: 12px; border: 1px solid var(--panel-b); background: rgba(0, 0, 0, .2); color: var(--text); font-weight: 800; font-size: 15px; cursor: pointer; }
-.formation-picker button.on { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #03222b; border-color: transparent; }
+.formation-picker button.on { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #04150c; border-color: transparent; }
 
 .player-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 .player-list li { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--panel-b); border-radius: 12px; padding: 10px 14px; }
@@ -108,7 +108,7 @@ body {
 
 /* ---------- Draft ---------- */
 .turn-banner { text-align: center; font-weight: 800; padding: 12px; border-radius: 14px; margin-bottom: 12px; background: var(--panel); border: 1px solid var(--panel-b); }
-.turn-banner.mine { background: linear-gradient(135deg, rgba(0, 230, 195, .25), rgba(20, 160, 255, .18)); border-color: var(--accent); }
+.turn-banner.mine { background: linear-gradient(135deg, rgba(0, 255, 135, .22), rgba(0, 200, 106, .14)); border-color: var(--accent); }
 .turn-banner b { color: var(--accent); }
 .draft-team { text-align: center; margin-bottom: 10px; }
 .team-flag { font-size: 44px; line-height: 1; }
@@ -122,12 +122,14 @@ body {
 .cards-grid.locked .fut { opacity: .4; filter: grayscale(.55); pointer-events: none; }
 
 /* ============ CARTE FUT ============ */
-.fut { position: relative; aspect-ratio: 0.72; border-radius: 12px 12px 14px 14px; cursor: pointer; overflow: hidden;
+/* Forme d'écusson FUT : hauts chanfreinés, base effilée. */
+.fut { position: relative; aspect-ratio: 0.72; cursor: pointer; overflow: hidden;
+  clip-path: polygon(11% 0, 89% 0, 100% 6.5%, 100% 83%, 86% 100%, 14% 100%, 0 83%, 0 6.5%);
   background: linear-gradient(150deg, #55637a, #1b2431); color: #0b1420;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.25), var(--shadow); transition: transform .12s; }
+  box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.3); transition: transform .12s; }
 .fut:active { transform: scale(.96); }
 .fut.disabled { opacity: .38; filter: grayscale(.6); pointer-events: none; }
-.fut.tier-elite { background: linear-gradient(150deg, #eafcff, #8fd8f2 45%, #2f7fa8); color: #06222e; box-shadow: inset 0 0 0 1px rgba(255,255,255,.6), 0 0 24px rgba(120, 220, 255, .4); }
+.fut.tier-elite { background: linear-gradient(150deg, #eafcff, #8fd8f2 45%, #2f7fa8); color: #06222e; box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.65); }
 .fut.tier-gold { background: linear-gradient(150deg, #fdeeae, #e6b84a 55%, #b9871c); color: #3a2600; }
 .fut.tier-silver { background: linear-gradient(150deg, #f4f7fa, #b9c2cc 60%, #8b96a2); color: #1c2530; }
 .fut.tier-bronze { background: linear-gradient(150deg, #edb98a, #b5773f 60%, #7d4a22); color: #2a1400; }
@@ -143,7 +145,7 @@ body {
 .fut-photo .silhouette { font-size: 46px; font-weight: 900; color: rgba(255,255,255,.85); letter-spacing: 1px; }
 .fut-photo img.ph { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .fut-name { text-align: center; font-weight: 900; font-size: 14px; text-transform: uppercase; letter-spacing: .3px; padding: 3px 0; border-top: 1px solid rgba(0,0,0,.28); }
-.fut-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 8px; font-size: 11px; font-weight: 700; }
+.fut-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 8px; font-size: 11px; font-weight: 700; padding: 0 9% 4px; }
 .fut-stats span { display: flex; justify-content: space-between; }
 .fut-stats b { font-weight: 900; }
 .fut-stats .lab { opacity: .72; }
@@ -162,7 +164,7 @@ body {
 
 .tabs { display: flex; gap: 5px; background: var(--panel); padding: 5px; border-radius: 14px; border: 1px solid var(--panel-b); }
 .tab { flex: 1; padding: 11px 0; border: none; background: transparent; color: var(--muted); font-weight: 800; border-radius: 10px; cursor: pointer; font-size: 12px; }
-.tab.on { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #03222b; }
+.tab.on { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #04150c; }
 .tab-panel { display: none; }
 .tab-panel.on { display: block; animation: fade .3s; }
 
@@ -224,7 +226,7 @@ body {
 .sp .spr { margin-left: auto; font-weight: 900; color: var(--accent); }
 .sp .spn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.you-tag { font-size: 10px; background: var(--accent); color: #03222b; padding: 2px 6px; border-radius: 10px; font-weight: 800; margin-left: 6px; }
+.you-tag { font-size: 10px; background: var(--accent); color: #04150c; padding: 2px 6px; border-radius: 10px; font-weight: 800; margin-left: 6px; }
 
 /* Modal carte plein écran */
 .modal { position: fixed; inset: 0; background: rgba(2, 10, 18, .82); backdrop-filter: blur(4px); display: none; place-items: center; z-index: 50; padding: 30px; }

@@ -44,16 +44,13 @@
   const monogram = (n) => n.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   const hashN = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
 
-  // Zone "photo" : tente de charger public/photos/<id>.jpg ; sinon avatar généré
-  // (dégradé déterministe + initiales) révélé si l'image est absente.
+  // Zone "portrait" : avatar généré (dégradé déterministe + initiales).
   function photoHtml(pl) {
     const h = hashN(pl.n + pl.c);
     const hue = h % 360, hue2 = (hue + 40) % 360;
-    const bg = `background:radial-gradient(120% 100% at 50% 0%, hsl(${hue} 55% 42%), hsl(${hue2} 45% 22%))`;
-    const img = pl.id != null
-      ? `<img class="ph" src="photos/${pl.id}.jpg" alt="" onerror="this.remove()"/>` : "";
+    const bg = `background:radial-gradient(120% 100% at 50% 0%, hsl(${hue} 45% 38%), hsl(${hue2} 40% 18%))`;
     return `<div class="fut-photo" style="${bg}">
-      <span class="silhouette">${monogram(pl.n)}</span>${img}</div>`;
+      <span class="silhouette">${monogram(pl.n)}</span></div>`;
   }
 
   function futCard(pl, opts) {

@@ -308,6 +308,77 @@
     liveInterval = setInterval(tick, 400);
   }
 
+  // ---------- Replay d'action sur demi-terrain (façon moteur FM) ----------
+  const EV_ICON = { goal: "⚽ BUT !", saved: "🧤 Arrêt", off: "❌ À côté", post: "🪵 Poteau" };
+
+  function halfPitchLines() {
+    return `<g fill="none" stroke="rgba(255,255,255,.42)" stroke-width="0.5">
+      <rect x="0.8" y="1.5" width="99.2" height="67"/>
+      <path d="M 0.8 23 A 12 12 0 0 1 0.8 47"/>
+      <rect x="83.5" y="13.5" width="16.5" height="43"/>
+      <rect x="94" y="25" width="6" height="20"/>
+      <path d="M 83.5 27.5 A 10.5 10.5 0 0 0 83.5 42.5"/>
+      <path d="M 96.5 1.5 A 3.5 3.5 0 0 0 100 5"/>
+      <path d="M 96.5 68.5 A 3.5 3.5 0 0 1 100 65"/>
+      <rect x="100" y="27.5" width="2.9" height="15" fill="rgba(255,255,255,.14)"/>
+    </g>
+    <circle cx="89" cy="35" r="0.8" fill="rgba(255,255,255,.5)"/>`;
+  }
+
+  // Rejoue une action : positions et déplacements plausibles dérivés de
+  // l'événement (passe -> frappe -> issue), gardien et défenseurs animés.
+  function actionReplay(ev, atkColor, defColor) {
+    const R = (n) => { let h = ((ev.m * 2654435761) ^ (ev.scorer.length * 40503) ^ (n * 2246822519)) >>> 0; return (h % 1000) / 1000; };
+    let hx = ev.side === "a" ? (ev.x - 50) * 2 : (50 - ev.x) * 2;
+    hx = Math.max(14, Math.min(92, hx));
+    const hy = Math.max(9, Math.min(61, 8 + ((ev.y - 18) / 64) * 54));
+
+    let end, gkTo;
+    if (ev.type === "goal") { end = { x: 101.6, y: 29.5 + R(1) * 11 }; gkTo = { x: 97.6, y: end.y > 35 ? 29 : 41 }; }
+    else if (ev.type === "saved") { end = { x: 97.4, y: 30.5 + R(2) * 9 }; gkTo = end; }
+    else if (ev.type === "post") { end = { x: 99.7, y: R(3) < 0.5 ? 27.8 : 42.2 }; gkTo = { x: 98, y: 35 }; }
+    else { end = { x: 102.5, y: R(4) < 0.5 ? 19 + R(5) * 6 : 45 + R(5) * 6 }; gkTo = { x: 98, y: 35 }; }
+
+    const passer = { x: Math.max(6, hx - (13 + R(6) * 9)), y: Math.max(8, Math.min(62, hy + (R(7) < 0.5 ? -1 : 1) * (9 + R(8) * 7))) };
+    const a2 = { x: 87, y: hy > 35 ? 23 + R(9) * 5 : 43 + R(9) * 5 };  // appel au second poteau
+    const a3 = { x: Math.max(9, hx - 22), y: hy > 35 ? hy - 15 : hy + 15 };
+    const d1 = { x: Math.min(94, hx + 7), y: hy + (hy > 35 ? -4 : 4) };  // défenseur qui ferme
+    const d2 = { x: 90, y: 35 + (hy > 35 ? -8 : 8) };
+    const d3 = { x: 80, y: hy > 35 ? 47 : 23 };
+    const GK = { x: 98.4, y: 35 };
+
+    const dist = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+    const dPass = dist(passer, { x: hx, y: hy }), dShot = dist({ x: hx, y: hy }, end);
+    const f = (dPass / (dPass + dShot)).toFixed(3);
+    const ballPath = `M ${passer.x} ${passer.y} L ${hx} ${hy} L ${end.x} ${end.y}`;
+
+    const dot = (p, color, extra) => `<circle cx="${p.x}" cy="${p.y}" r="2" fill="${color}" stroke="rgba(255,255,255,.65)" stroke-width="0.45">${extra || ""}</circle>`;
+    const move = (from, to, begin, dur) =>
+      `<animateMotion begin="${begin}s" dur="${dur}s" fill="freeze" path="M 0 0 L ${(to.x - from.x).toFixed(1)} ${(to.y - from.y).toFixed(1)}"/>`;
+
+    return `<div class="half-pitch"><svg viewBox="0 0 104 70" preserveAspectRatio="none">
+      ${halfPitchLines()}
+      ${dot(a3, atkColor)}
+      ${dot(a2, atkColor, move(a2, { x: 93, y: a2.y + (35 - a2.y) * 0.4 }, 0.4, 1.2))}
+      ${dot(d3, defColor)}
+      ${dot(d2, defColor, move(d2, { x: 92.5, y: 35 + (35 - d2.y) * -0.4 }, 0.5, 1.1))}
+      ${dot(d1, defColor, move(d1, { x: hx + 2, y: hy }, 0.25, 1.05))}
+      ${dot(passer, atkColor, move(passer, { x: passer.x + 4, y: passer.y + (hy > passer.y ? 3 : -3) }, 0.9, 1))}
+      ${dot({ x: hx, y: hy }, atkColor)}
+      <circle cx="${GK.x}" cy="${GK.y}" r="2" fill="${defColor}" stroke="#ffd54a" stroke-width="0.7">${move(GK, gkTo, 1.25, 0.35)}</circle>
+      <circle cx="0" cy="0" r="1.2" fill="#fff" stroke="rgba(0,0,0,.5)" stroke-width="0.3">
+        <animateMotion begin="0.25s" dur="1.55s" fill="freeze" calcMode="linear"
+          keyPoints="0;${f};${f};1" keyTimes="0;0.42;0.68;1" path="${ballPath}"/>
+      </circle>
+    </svg>
+    <div class="stage-note">${ev.m}' ${EV_ICON[ev.type] || ""} ${esc(ev.scorer.split(" ").slice(-1)[0])}</div></div>`;
+  }
+
+  function kickoffStage() {
+    return `<div class="half-pitch"><svg viewBox="0 0 104 70" preserveAspectRatio="none">${halfPitchLines()}</svg>
+      <div class="stage-note">🟢 Coup d'envoi…</div></div>`;
+  }
+
   // Score d'un match à la minute donnée.
   function scoreAt(m, minute) {
     if (minute >= 90) return { ga: m.ga, gb: m.gb };
@@ -319,28 +390,44 @@
   function drawLive(p, mine, minute, isLocal) {
     const ft = minute >= 90;
     const badge = ft ? '<span class="live-min ft">TERMINÉ</span>' : `<span class="live-min">⏱ ${minute}'</span>`;
+    // En mode 1 téléphone, on suit le premier match de la journée en vedette.
+    const featured = mine || (isLocal ? p.matches[0] : null);
 
-    if (mine) {
-      const sc = scoreAt(mine, minute);
+    if (featured) {
+      const sc = scoreAt(featured, minute);
       $("live-card").innerHTML = `
-        <div class="lc-stage">${esc(p.stage)} · TON MATCH ${badge}</div>
+        <div class="lc-stage">${esc(p.stage)} · ${mine ? "TON MATCH" : "MATCH VEDETTE"} ${badge}</div>
         <div class="lc-row">
-          <span class="lc-team">${esc(mine.an)}</span>
+          <span class="lc-team">${esc(featured.an)}</span>
           <span class="lc-score">${sc.ga} - ${sc.gb}</span>
-          <span class="lc-team">${esc(mine.bn)}</span>
+          <span class="lc-team">${esc(featured.bn)}</span>
         </div>
-        ${ft && mine.pens ? `<div class="lc-pens">Tirs au but : ${mine.pens.pa} - ${mine.pens.pb}</div>` : ""}
-        ${fmPitchHtml(mine.events, minute)}`;
-      const evs = (mine.events || []).filter((e) => e.m <= minute).sort((a, b) => b.m - a.m);
+        ${ft && featured.pens ? `<div class="lc-pens">Tirs au but : ${featured.pens.pa} - ${featured.pens.pb}</div>` : ""}`;
+
+      // Replay de la dernière action : rendu uniquement quand l'action change.
+      const seen = (featured.events || []).filter((e) => e.m <= minute);
+      const last = seen[seen.length - 1];
+      const key = p.stage + ":" + featured.a + ":" + (last ? last.m + last.scorer + last.type : "ko");
+      if (state.replayKey !== key) {
+        state.replayKey = key;
+        const kitOf = (pid) => { const pl = state.snap.players.find((x) => x.pid === pid); return pl && pl.kit ? pl.kit.p : "#e11d2a"; };
+        const atk = last ? kitOf(last.side === "a" ? featured.a : featured.b) : "#e11d2a";
+        const def = last ? kitOf(last.side === "a" ? featured.b : featured.a) : "#1f6feb";
+        $("live-stage").innerHTML = last ? actionReplay(last, atk, def === atk ? "#f1f3f5" : def) : kickoffStage();
+      }
+
+      const evs = seen.slice().sort((a, b) => b.m - a.m);
       $("live-summary").innerHTML = `<div class="live-feed">${
         evs.map((e) => `<div class="evline ${e.type === "goal" ? "goal" : ""}"><span class="min">${e.m}'</span><span class="etxt">${esc(e.text)}</span></div>`).join("")
         || `<div class="evline"><span class="min">1'</span><span class="etxt">🟢 Coup d'envoi !</span></div>`}</div>`;
     } else {
       $("live-card").innerHTML = `<div class="lc-stage">${esc(p.stage)} · MULTIPLEX ${badge}</div>`;
+      $("live-stage").innerHTML = "";
+      state.replayKey = null;
       $("live-summary").innerHTML = "";
     }
 
-    const others = p.matches.filter((m) => m !== mine);
+    const others = p.matches.filter((m) => m !== featured);
     $("live-prev-title").textContent = mine ? "Multiplex — les autres matchs" : "Tous les matchs";
     $("live-prev-title").style.display = others.length ? "" : "none";
     $("live-prev").innerHTML = others.map((m) => {

@@ -308,75 +308,118 @@
     liveInterval = setInterval(tick, 400);
   }
 
-  // ---------- Replay d'action sur demi-terrain (façon moteur FM) ----------
+  // ---------- Replay d'action : 11 contre 11 sur terrain complet ----------
   const EV_ICON = { goal: "⚽ BUT !", saved: "🧤 Arrêt", off: "❌ À côté", post: "🪵 Poteau" };
 
-  function halfPitchLines() {
-    return `<g fill="none" stroke="rgba(255,255,255,.42)" stroke-width="0.5">
-      <rect x="0.8" y="1.5" width="99.2" height="67"/>
-      <path d="M 0.8 23 A 12 12 0 0 1 0.8 47"/>
-      <rect x="83.5" y="13.5" width="16.5" height="43"/>
-      <rect x="94" y="25" width="6" height="20"/>
-      <path d="M 83.5 27.5 A 10.5 10.5 0 0 0 83.5 42.5"/>
-      <path d="M 96.5 1.5 A 3.5 3.5 0 0 0 100 5"/>
-      <path d="M 96.5 68.5 A 3.5 3.5 0 0 1 100 65"/>
-      <rect x="100" y="27.5" width="2.9" height="15" fill="rgba(255,255,255,.14)"/>
+  // Tracé du terrain complet (partagé avec la feuille de match).
+  function fmLinesSvg() {
+    return `<g fill="none" stroke="rgba(255,255,255,.38)" stroke-width="0.45">
+      <rect x="1.5" y="1.5" width="97" height="61"/>
+      <line x1="50" y1="1.5" x2="50" y2="62.5"/><circle cx="50" cy="32" r="9.5"/>
+      <rect x="1.5" y="16" width="13" height="32"/><rect x="1.5" y="25" width="5" height="14"/>
+      <path d="M 14.5 26 A 8 8 0 0 1 14.5 38"/>
+      <rect x="85.5" y="16" width="13" height="32"/><rect x="93.5" y="25" width="5" height="14"/>
+      <path d="M 85.5 38 A 8 8 0 0 1 85.5 26"/>
+      <path d="M 1.5 5 A 3.5 3.5 0 0 0 5 1.5"/><path d="M 95 1.5 A 3.5 3.5 0 0 0 98.5 5"/>
+      <path d="M 1.5 59 A 3.5 3.5 0 0 1 5 62.5"/><path d="M 95 62.5 A 3.5 3.5 0 0 1 98.5 59"/>
     </g>
-    <circle cx="89" cy="35" r="0.8" fill="rgba(255,255,255,.5)"/>`;
+    <g fill="rgba(255,255,255,.5)"><circle cx="50" cy="32" r="0.8"/><circle cx="10" cy="32" r="0.8"/><circle cx="90" cy="32" r="0.8"/></g>`;
   }
 
-  // Rejoue une action : positions et déplacements plausibles dérivés de
-  // l'événement (passe -> frappe -> issue), gardien et défenseurs animés.
-  function actionReplay(ev, atkColor, defColor) {
+  // Position d'un slot de formation sur le terrain horizontal.
+  // side "a" = moitié gauche (attaque vers la droite), "b" = miroir.
+  function slotPoint(slot, side) {
+    const d = 100 - slot.y; // profondeur depuis son propre but
+    return { x: side === "a" ? 3.5 + d * 0.44 : 96.5 - d * 0.44, y: 4.5 + slot.x * 0.55 };
+  }
+
+  // Les onze d'une équipe placés dans SA formation réelle.
+  function teamSetup(pid, side) {
+    const pl = (state.snap.players || []).find((x) => x.pid === pid) || {};
+    const placement = MODEL.placeInSlots(pl.squad || [], pl.formationKey || "4-3-3");
+    const dots = placement.filter((s) => s.player).map((s) => ({
+      n: s.player.n, pos: s.slot.pos, p: slotPoint(s.slot, side),
+    }));
+    return { dots, kit: (pl.kit && pl.kit.p) || (side === "a" ? "#e11d2a" : "#1f6feb") };
+  }
+
+  // Rejoue une action au milieu du 11v11 : le tireur part de SON poste vers
+  // le point de tir réel, reçoit la passe d'un coéquipier proche, frappe ;
+  // les défenseurs les plus proches ferment, le gardien plonge.
+  function actionReplay(match, ev) {
     const R = (n) => { let h = ((ev.m * 2654435761) ^ (ev.scorer.length * 40503) ^ (n * 2246822519)) >>> 0; return (h % 1000) / 1000; };
-    let hx = ev.side === "a" ? (ev.x - 50) * 2 : (50 - ev.x) * 2;
-    hx = Math.max(14, Math.min(92, hx));
-    const hy = Math.max(9, Math.min(61, 8 + ((ev.y - 18) / 64) * 54));
+    const atkSide = ev.side, right = atkSide === "a";
+    const A = teamSetup(right ? match.a : match.b, atkSide);
+    const D = teamSetup(right ? match.b : match.a, right ? "b" : "a");
+    if (A.kit.toLowerCase() === D.kit.toLowerCase()) D.kit = "#f1f3f5";
 
+    const shot = { x: Math.max(4, Math.min(96, ev.x)), y: Math.max(5, Math.min(59, ev.y * 0.64)) };
+    const near = (list, pt, excl) => list
+      .filter((d) => d.pos !== "GK" && d !== excl)
+      .sort((u, v) => Math.hypot(u.p.x - pt.x, u.p.y - pt.y) - Math.hypot(v.p.x - pt.x, v.p.y - pt.y));
+    let shooter = A.dots.find((d) => d.n === ev.scorer) || near(A.dots, shot)[0];
+    const passer = near(A.dots, shot, shooter)[0];
+    const defsNear = near(D.dots, shot).slice(0, 2);
+    const gk = D.dots.find((d) => d.pos === "GK") || D.dots[0];
+
+    const gy = (v) => Math.max(3, Math.min(61, v));
     let end, gkTo;
-    if (ev.type === "goal") { end = { x: 101.6, y: 29.5 + R(1) * 11 }; gkTo = { x: 97.6, y: end.y > 35 ? 29 : 41 }; }
-    else if (ev.type === "saved") { end = { x: 97.4, y: 30.5 + R(2) * 9 }; gkTo = end; }
-    else if (ev.type === "post") { end = { x: 99.7, y: R(3) < 0.5 ? 27.8 : 42.2 }; gkTo = { x: 98, y: 35 }; }
-    else { end = { x: 102.5, y: R(4) < 0.5 ? 19 + R(5) * 6 : 45 + R(5) * 6 }; gkTo = { x: 98, y: 35 }; }
+    if (ev.type === "goal") { end = { x: right ? 99.3 : 0.7, y: gy(27.5 + R(1) * 9) }; gkTo = { x: gk.p.x, y: end.y > 32 ? 26.5 : 37.5 }; }
+    else if (ev.type === "saved") { end = { x: right ? 96.4 : 3.6, y: gy(28 + R(2) * 8) }; gkTo = end; }
+    else if (ev.type === "post") { end = { x: right ? 98.4 : 1.6, y: R(3) < 0.5 ? 26.2 : 37.8 }; gkTo = { x: gk.p.x, y: 32 }; }
+    else { end = { x: right ? 99.6 : 0.4, y: R(4) < 0.5 ? gy(16 + R(5) * 6) : gy(42 + R(5) * 6) }; gkTo = { x: gk.p.x, y: 32 }; }
 
-    const passer = { x: Math.max(6, hx - (13 + R(6) * 9)), y: Math.max(8, Math.min(62, hy + (R(7) < 0.5 ? -1 : 1) * (9 + R(8) * 7))) };
-    const a2 = { x: 87, y: hy > 35 ? 23 + R(9) * 5 : 43 + R(9) * 5 };  // appel au second poteau
-    const a3 = { x: Math.max(9, hx - 22), y: hy > 35 ? hy - 15 : hy + 15 };
-    const d1 = { x: Math.min(94, hx + 7), y: hy + (hy > 35 ? -4 : 4) };  // défenseur qui ferme
-    const d2 = { x: 90, y: 35 + (hy > 35 ? -8 : 8) };
-    const d3 = { x: 80, y: hy > 35 ? 47 : 23 };
-    const GK = { x: 98.4, y: 35 };
+    // Ballon : passe -> contrôle -> frappe (+ rebond sur poteau).
+    const pts = [passer.p, shot, end];
+    if (ev.type === "post") pts.push({ x: shot.x + (right ? -9 : 9), y: gy(shot.y + (R(6) < 0.5 ? -5 : 5)) });
+    const seg = []; let total = 0;
+    for (let i = 1; i < pts.length; i++) { const L = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y) || 0.1; seg.push(L); total += L; }
+    const f1 = (seg[0] / total).toFixed(3);
+    const f2 = ((seg[0] + seg[1]) / total).toFixed(3);
+    const path = pts.map((p, i) => (i ? "L" : "M") + ` ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+    const kp = pts.length === 3 ? `0;${f1};${f1};1` : `0;${f1};${f1};${f2};1`;
+    const kt = pts.length === 3 ? "0;0.42;0.62;1" : "0;0.38;0.56;0.82;1";
 
-    const dist = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
-    const dPass = dist(passer, { x: hx, y: hy }), dShot = dist({ x: hx, y: hy }, end);
-    const f = (dPass / (dPass + dShot)).toFixed(3);
-    const ballPath = `M ${passer.x} ${passer.y} L ${hx} ${hy} L ${end.x} ${end.y}`;
-
-    const dot = (p, color, extra) => `<circle cx="${p.x}" cy="${p.y}" r="2" fill="${color}" stroke="rgba(255,255,255,.65)" stroke-width="0.45">${extra || ""}</circle>`;
     const move = (from, to, begin, dur) =>
       `<animateMotion begin="${begin}s" dur="${dur}s" fill="freeze" path="M 0 0 L ${(to.x - from.x).toFixed(1)} ${(to.y - from.y).toFixed(1)}"/>`;
+    const dot = (d, color, extra, ring) =>
+      `<circle cx="${d.p.x.toFixed(1)}" cy="${d.p.y.toFixed(1)}" r="1.7" fill="${color}" stroke="${ring ? "#ffd54a" : "rgba(255,255,255,.55)"}" stroke-width="${ring ? 0.6 : 0.35}">${extra || ""}</circle>`;
 
-    return `<div class="half-pitch"><svg viewBox="0 0 104 70" preserveAspectRatio="none">
-      ${halfPitchLines()}
-      ${dot(a3, atkColor)}
-      ${dot(a2, atkColor, move(a2, { x: 93, y: a2.y + (35 - a2.y) * 0.4 }, 0.4, 1.2))}
-      ${dot(d3, defColor)}
-      ${dot(d2, defColor, move(d2, { x: 92.5, y: 35 + (35 - d2.y) * -0.4 }, 0.5, 1.1))}
-      ${dot(d1, defColor, move(d1, { x: hx + 2, y: hy }, 0.25, 1.05))}
-      ${dot(passer, atkColor, move(passer, { x: passer.x + 4, y: passer.y + (hy > passer.y ? 3 : -3) }, 0.9, 1))}
-      ${dot({ x: hx, y: hy }, atkColor)}
-      <circle cx="${GK.x}" cy="${GK.y}" r="2" fill="${defColor}" stroke="#ffd54a" stroke-width="0.7">${move(GK, gkTo, 1.25, 0.35)}</circle>
-      <circle cx="0" cy="0" r="1.2" fill="#fff" stroke="rgba(0,0,0,.5)" stroke-width="0.3">
-        <animateMotion begin="0.25s" dur="1.55s" fill="freeze" calcMode="linear"
-          keyPoints="0;${f};${f};1" keyTimes="0;0.42;0.68;1" path="${ballPath}"/>
+    const players = []
+      .concat(A.dots.map((d) => {
+        if (d === shooter) return dot(d, A.kit, move(d.p, shot, 0.15, 1.1));
+        if (d === passer) return dot(d, A.kit, move(d.p, { x: d.p.x + (shot.x - d.p.x) * 0.2, y: d.p.y + (shot.y - d.p.y) * 0.2 }, 0.9, 1));
+        return dot(d, A.kit, d.pos === "GK" ? "" : "", d.pos === "GK");
+      }))
+      .concat(D.dots.map((d) => {
+        if (d === gk) return dot(d, D.kit, move(d.p, gkTo, 1.5, 0.35), true);
+        if (defsNear.includes(d)) return dot(d, D.kit, move(d.p, { x: d.p.x + (shot.x - d.p.x) * 0.35, y: d.p.y + (shot.y - d.p.y) * 0.35 }, 0.55, 1.1));
+        return dot(d, D.kit);
+      }))
+      .join("");
+
+    return `<div class="fm-pitch replay"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
+      ${fmLinesSvg()}
+      ${players}
+      <circle cx="0" cy="0" r="1.15" fill="#fff" stroke="rgba(0,0,0,.45)" stroke-width="0.3">
+        <animateMotion begin="0.15s" dur="2.15s" fill="freeze" calcMode="linear" keyPoints="${kp}" keyTimes="${kt}" path="${path}"/>
       </circle>
     </svg>
     <div class="stage-note">${ev.m}' ${EV_ICON[ev.type] || ""} ${esc(ev.scorer.split(" ").slice(-1)[0])}</div></div>`;
   }
 
-  function kickoffStage() {
-    return `<div class="half-pitch"><svg viewBox="0 0 104 70" preserveAspectRatio="none">${halfPitchLines()}</svg>
-      <div class="stage-note">🟢 Coup d'envoi…</div></div>`;
+  // Coup d'envoi : les deux onze alignés dans leurs formations, ballon au centre.
+  function kickoffStage(match) {
+    const A = teamSetup(match.a, "a"), D = teamSetup(match.b, "b");
+    if (A.kit.toLowerCase() === D.kit.toLowerCase()) D.kit = "#f1f3f5";
+    const dot = (d, color, ring) =>
+      `<circle cx="${d.p.x.toFixed(1)}" cy="${d.p.y.toFixed(1)}" r="1.7" fill="${color}" stroke="${ring ? "#ffd54a" : "rgba(255,255,255,.55)"}" stroke-width="${ring ? 0.6 : 0.35}"/>`;
+    const players = A.dots.map((d) => dot(d, A.kit, d.pos === "GK")).join("")
+      + D.dots.map((d) => dot(d, D.kit, d.pos === "GK")).join("");
+    return `<div class="fm-pitch replay"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
+      ${fmLinesSvg()}${players}
+      <circle cx="50" cy="32" r="1.15" fill="#fff" stroke="rgba(0,0,0,.45)" stroke-width="0.3"/>
+    </svg><div class="stage-note">🟢 Coup d'envoi…</div></div>`;
   }
 
   // Score d'un match à la minute donnée.
@@ -410,10 +453,7 @@
       const key = p.stage + ":" + featured.a + ":" + (last ? last.m + last.scorer + last.type : "ko");
       if (state.replayKey !== key) {
         state.replayKey = key;
-        const kitOf = (pid) => { const pl = state.snap.players.find((x) => x.pid === pid); return pl && pl.kit ? pl.kit.p : "#e11d2a"; };
-        const atk = last ? kitOf(last.side === "a" ? featured.a : featured.b) : "#e11d2a";
-        const def = last ? kitOf(last.side === "a" ? featured.b : featured.a) : "#1f6feb";
-        $("live-stage").innerHTML = last ? actionReplay(last, atk, def === atk ? "#f1f3f5" : def) : kickoffStage();
+        $("live-stage").innerHTML = last ? actionReplay(featured, last) : kickoffStage(featured);
       }
 
       const evs = seen.slice().sort((a, b) => b.m - a.m);
@@ -730,24 +770,11 @@
   const EV_COLOR = { goal: "#2fe38a", saved: "#14a0ff", off: "#8aa3ba", post: "#f0b429" };
   const EV_LABEL = { goal: "But", saved: "Arrêt", off: "Tir manqué", post: "Poteau" };
 
-  // Terrain FM horizontal avec les actions (jusqu'à une minute donnée).
+  // Terrain FM horizontal avec la carte des actions (feuille de match).
   function fmPitchHtml(events, minuteLimit) {
     const dots = (events || []).filter((e) => e.m <= minuteLimit).map((ev) =>
       `<circle class="fm-dot" cx="${ev.x}" cy="${ev.y * 0.64}" r="${ev.type === "goal" ? 3 : 2.1}" fill="${EV_COLOR[ev.type]}"/>`).join("");
-    return `<div class="fm-pitch"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
-      <g fill="none" stroke="rgba(255,255,255,.38)" stroke-width="0.45">
-        <rect x="1.5" y="1.5" width="97" height="61"/>
-        <line x1="50" y1="1.5" x2="50" y2="62.5"/><circle cx="50" cy="32" r="9.5"/>
-        <rect x="1.5" y="16" width="13" height="32"/><rect x="1.5" y="25" width="5" height="14"/>
-        <path d="M 14.5 26 A 8 8 0 0 1 14.5 38"/>
-        <rect x="85.5" y="16" width="13" height="32"/><rect x="93.5" y="25" width="5" height="14"/>
-        <path d="M 85.5 38 A 8 8 0 0 1 85.5 26"/>
-        <path d="M 1.5 5 A 3.5 3.5 0 0 0 5 1.5"/><path d="M 95 1.5 A 3.5 3.5 0 0 0 98.5 5"/>
-        <path d="M 1.5 59 A 3.5 3.5 0 0 1 5 62.5"/><path d="M 95 62.5 A 3.5 3.5 0 0 1 98.5 59"/>
-      </g>
-      <g fill="rgba(255,255,255,.5)"><circle cx="50" cy="32" r="0.8"/><circle cx="10" cy="32" r="0.8"/><circle cx="90" cy="32" r="0.8"/></g>
-      ${dots}
-    </svg></div>`;
+    return `<div class="fm-pitch"><svg viewBox="0 0 100 64" preserveAspectRatio="none">${fmLinesSvg()}${dots}</svg></div>`;
   }
 
   function matchModal(mm) {

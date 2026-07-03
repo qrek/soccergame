@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v13 — scoreboard maillots";
+  const APP_VERSION = "v14 — match simulé en continu";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -345,7 +345,7 @@
   // ---------- Rendu principal ----------
   function render() {
     const s = state.snap; if (!s) return;
-    if (s.phase !== "playing") clearInterval(liveInterval);
+    if (s.phase !== "playing") { clearInterval(liveInterval); cancelAnimationFrame(state.simRaf); state.sim = null; state.liveRoundKey = null; }
     if (s.phase === "lobby") { renderLobby(s); show("screen-lobby"); }
     else if (s.phase === "draft") { renderDraft(s); show("screen-draft"); }
     else if (s.phase === "playing") { renderPlaying(s); show("screen-playing"); }
@@ -361,16 +361,17 @@
   function setText(el, txt) { if (el && el.__txt !== txt) { el.__txt = txt; el.textContent = txt; } }
 
   // Horloge d'un match : linéaire 0'->90', figée `hold` ms sur chaque but.
+  // minuteF (continue) pilote la simulation ; holdT = avancement célébration.
   function matchClock(elapsed, goals, clockMs, hold) {
     let holds = 0;
     for (const g of goals) {
       const tg = (g.m / 90) * clockMs + holds;
       if (elapsed < tg) break;
-      if (elapsed < tg + hold) return { minute: g.m, holding: g, ft: false };
+      if (elapsed < tg + hold) return { minute: g.m, minuteF: g.m, holding: g, holdT: (elapsed - tg) / hold, ft: false };
       holds += hold;
     }
-    const minute = Math.max(0, Math.min(90, Math.floor(((elapsed - holds) / clockMs) * 90)));
-    return { minute, holding: null, ft: elapsed - holds >= clockMs };
+    const mf = Math.max(0, Math.min(90, ((elapsed - holds) / clockMs) * 90));
+    return { minute: Math.floor(mf), minuteF: mf, holding: null, holdT: 0, ft: elapsed - holds >= clockMs };
   }
   const goalsOf = (m) => (m.events || []).filter((e) => e.type === "goal").sort((a, b) => a.m - b.m);
 
@@ -388,14 +389,26 @@
     const roundKey = s.code + "|" + p.stage + "|" + p.round;
     if (state.liveRoundKey !== roundKey) {
       state.liveRoundKey = roundKey;
-      state.replayKey = null;
       buildLiveSkeleton(p, featured, mine, isLocal);
+      state.sim = featured ? buildSim(featured) : null;
     }
 
     clearInterval(liveInterval);
     const tick = () => drawLive(p, featured, isLocal);
     tick();
     liveInterval = setInterval(tick, 300);
+
+    // Boucle fluide (60 fps) : positions des joueurs et du ballon.
+    cancelAnimationFrame(state.simRaf);
+    if (featured && state.sim) {
+      const hold = p.goalHoldMs || 3500;
+      const loop = () => {
+        if (!state.snap || state.snap.phase !== "playing" || !state.sim) return;
+        simTick(state.sim, matchClock(Date.now() - p.startedAt, goalsOf(featured), p.clockMs, hold));
+        state.simRaf = requestAnimationFrame(loop);
+      };
+      state.simRaf = requestAnimationFrame(loop);
+    }
   }
 
   function buildLiveSkeleton(p, featured, mine, isLocal) {
@@ -419,7 +432,6 @@
   }
 
   // ---------- Replay d'action : 11 contre 11 sur terrain complet ----------
-  const EV_ICON = { goal: "⚽ BUT !", saved: "🧤 Arrêt", off: "❌ À côté", post: "🪵 Poteau" };
 
   // Tracé du terrain complet (partagé avec la feuille de match).
   function fmLinesSvg() {
@@ -453,106 +465,131 @@
     return { dots, kit: (pl.kit && pl.kit.p) || (side === "a" ? "#e11d2a" : "#1f6feb") };
   }
 
-  // Rejoue une action au milieu du 11v11 : le tireur part de SON poste vers
-  // le point de tir réel, reçoit la passe d'un coéquipier proche, frappe ;
-  // les défenseurs les plus proches ferment, le gardien plonge.
-  function actionReplay(match, ev) {
-    const R = (n) => { let h = ((ev.m * 2654435761) ^ (ev.scorer.length * 40503) ^ (n * 2246822519)) >>> 0; return (h % 1000) / 1000; };
-    const atkSide = ev.side, right = atkSide === "a";
-    const A = teamSetup(right ? match.a : match.b, atkSide);
-    const D = teamSetup(right ? match.b : match.a, right ? "b" : "a");
-    if (A.kit.toLowerCase() === D.kit.toLowerCase()) D.kit = "#f1f3f5";
-
-    const shot = { x: Math.max(4, Math.min(96, ev.x)), y: Math.max(5, Math.min(59, ev.y * 0.64)) };
-    const near = (list, pt, excl) => list
-      .filter((d) => d.pos !== "GK" && d !== excl)
-      .sort((u, v) => Math.hypot(u.p.x - pt.x, u.p.y - pt.y) - Math.hypot(v.p.x - pt.x, v.p.y - pt.y));
-    let shooter = A.dots.find((d) => d.n === ev.scorer) || near(A.dots, shot)[0];
-    const passer = near(A.dots, shot, shooter)[0];
-    const defsNear = near(D.dots, shot).slice(0, 2);
-    const gk = D.dots.find((d) => d.pos === "GK") || D.dots[0];
-
-    const gy = (v) => Math.max(3, Math.min(61, v));
-    let end, gkTo;
-    if (ev.type === "goal") { end = { x: right ? 99.3 : 0.7, y: gy(27.5 + R(1) * 9) }; gkTo = { x: gk.p.x, y: end.y > 32 ? 26.5 : 37.5 }; }
-    else if (ev.type === "saved") { end = { x: right ? 96.4 : 3.6, y: gy(28 + R(2) * 8) }; gkTo = end; }
-    else if (ev.type === "post") { end = { x: right ? 98.4 : 1.6, y: R(3) < 0.5 ? 26.2 : 37.8 }; gkTo = { x: gk.p.x, y: 32 }; }
-    else { end = { x: right ? 99.6 : 0.4, y: R(4) < 0.5 ? gy(16 + R(5) * 6) : gy(42 + R(5) * 6) }; gkTo = { x: gk.p.x, y: 32 }; }
-
-    // Ballon : passe -> contrôle -> frappe (+ rebond sur poteau).
-    const pts = [passer.p, shot, end];
-    if (ev.type === "post") pts.push({ x: shot.x + (right ? -9 : 9), y: gy(shot.y + (R(6) < 0.5 ? -5 : 5)) });
-    const seg = []; let total = 0;
-    for (let i = 1; i < pts.length; i++) { const L = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y) || 0.1; seg.push(L); total += L; }
-    const f1 = (seg[0] / total).toFixed(3);
-    const f2 = ((seg[0] + seg[1]) / total).toFixed(3);
-    const path = pts.map((p, i) => (i ? "L" : "M") + ` ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-    const kp = pts.length === 3 ? `0;${f1};${f1};1` : `0;${f1};${f1};${f2};1`;
-    const kt = pts.length === 3 ? "0;0.42;0.62;1" : "0;0.38;0.56;0.82;1";
-
-    const move = (from, to, begin, dur) =>
-      `<animateMotion begin="${begin}s" dur="${dur}s" fill="freeze" path="M 0 0 L ${(to.x - from.x).toFixed(1)} ${(to.y - from.y).toFixed(1)}"/>`;
-    // Balancement permanent : personne ne reste figé (réaliste, subtil).
-    let swayN = 0;
-    const sway = () => {
-      swayN++;
-      const a = (R(swayN * 7) - 0.5) * 2.4, b = (R(swayN * 13) - 0.5) * 2;
-      return `<animateTransform attributeName="transform" type="translate" additive="sum"
-        values="0 0;${a.toFixed(1)} ${b.toFixed(1)};${(-a * 0.7).toFixed(1)} ${(-b * 0.7).toFixed(1)};0 0"
-        dur="${(3.4 + R(swayN * 3) * 2.2).toFixed(1)}s" repeatCount="indefinite"/>`;
-    };
-    const dot = (d, color, extra, ring) =>
-      `<circle cx="${d.p.x.toFixed(1)}" cy="${d.p.y.toFixed(1)}" r="1.7" fill="${color}" stroke="${ring ? "#ffd54a" : "rgba(255,255,255,.55)"}" stroke-width="${ring ? 0.6 : 0.35}">${extra || ""}${sway()}</circle>`;
-
-    // Célébration de but : le buteur grossit, deux coéquipiers le rejoignent.
-    const isGoal = ev.type === "goal";
-    const mates = isGoal ? near(A.dots, shot, shooter).slice(1, 3) : [];
-    const cheer = `<animate attributeName="r" values="1.7;1.7;2.7;2" keyTimes="0;0.72;0.85;1" dur="2.6s" fill="freeze"/>`;
-    const push = right ? 4.5 : -4.5; // le bloc offensif accompagne l'action
-
-    const players = []
-      .concat(A.dots.map((d) => {
-        if (d === shooter) return dot(d, A.kit, move(d.p, shot, 0.15, 1.1) + (isGoal ? cheer : ""));
-        if (mates.includes(d)) return dot(d, A.kit, move(d.p, { x: shot.x + (R(swayN) - 0.5) * 6, y: shot.y + (R(swayN + 1) - 0.5) * 6 }, 1.85, 0.6));
-        if (d === passer) return dot(d, A.kit, move(d.p, { x: d.p.x + (shot.x - d.p.x) * 0.2, y: d.p.y + (shot.y - d.p.y) * 0.2 }, 0.9, 1));
-        if (d.pos === "GK") return dot(d, A.kit, "", true);
-        return dot(d, A.kit, move(d.p, { x: d.p.x + push, y: d.p.y + (32 - d.p.y) * 0.06 }, 0.3, 1.6));
-      }))
-      .concat(D.dots.map((d) => {
-        if (d === gk) return dot(d, D.kit, move(d.p, gkTo, 1.5, 0.35), true);
-        if (defsNear.includes(d)) return dot(d, D.kit, move(d.p, { x: d.p.x + (shot.x - d.p.x) * 0.35, y: d.p.y + (shot.y - d.p.y) * 0.35 }, 0.55, 1.1));
-        // le bloc défensif recule et coulisse vers le côté du ballon
-        return dot(d, D.kit, move(d.p, { x: d.p.x - push * 0.5, y: d.p.y + (shot.y - d.p.y) * 0.12 }, 0.35, 1.5));
-      }))
-      .join("");
-
-    return `<div class="fm-pitch replay"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
-      ${fmLinesSvg()}
-      ${players}
-      <circle cx="0" cy="0" r="1.15" fill="#fff" stroke="rgba(0,0,0,.45)" stroke-width="0.3">
-        <animateMotion begin="0.15s" dur="2.15s" fill="freeze" calcMode="linear" keyPoints="${kp}" keyTimes="${kt}" path="${path}"/>
-      </circle>
-    </svg>
-    <div class="stage-note">${ev.m}' ${EV_ICON[ev.type] || ""} ${esc(ev.scorer.split(" ").slice(-1)[0])}</div></div>`;
+  // ---------- Simulation continue du match (11v11 fluide) ----------
+  // Le ballon suit une trajectoire déterministe (circulation, montées vers
+  // chaque action, relances) ; les 22 joueurs gravitent autour : maintien de
+  // la formation, pressing du plus proche, course du tireur, gardiens qui
+  // suivent. Le tout est piloté par l'horloge du match : pendant la pause
+  // célébration d'un but, TOUT est figé, puis engagement au centre.
+  const clampV = (v, a, b) => Math.max(a, Math.min(b, v));
+  function mulberry(seed) {
+    let a = seed >>> 0;
+    return function () { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   }
 
-  // Coup d'envoi : les deux onze alignés dans leurs formations, ballon au centre.
-  function kickoffStage(match) {
-    const A = teamSetup(match.a, "a"), D = teamSetup(match.b, "b");
-    if (A.kit.toLowerCase() === D.kit.toLowerCase()) D.kit = "#f1f3f5";
-    let n = 0;
-    const dot = (d, color, ring) => {
-      n++;
-      const a = ((n * 37 % 10) / 10 - 0.5) * 2.2, b = ((n * 53 % 10) / 10 - 0.5) * 1.8;
-      return `<circle cx="${d.p.x.toFixed(1)}" cy="${d.p.y.toFixed(1)}" r="1.7" fill="${color}" stroke="${ring ? "#ffd54a" : "rgba(255,255,255,.55)"}" stroke-width="${ring ? 0.6 : 0.35}">
-        <animateTransform attributeName="transform" type="translate" additive="sum" values="0 0;${a.toFixed(1)} ${b.toFixed(1)};0 0" dur="${(3.2 + (n % 5) * 0.5).toFixed(1)}s" repeatCount="indefinite"/></circle>`;
+  // Trajectoire du ballon sur tout le match (déterministe, partagée).
+  function buildBallTimeline(match) {
+    const rng = mulberry(((match.a * 73856093) ^ (match.b * 19349663)) >>> 0);
+    const evs = (match.events || []).slice().sort((a, b) => a.m - b.m);
+    const wp = [{ m: 0, x: 50, y: 32 }];
+    let last = 0;
+    const meander = (from, to) => {
+      let t = from;
+      while (t < to) { wp.push({ m: t, x: 18 + rng() * 64, y: 8 + rng() * 48 }); t += 3 + rng() * 3.5; }
     };
-    const players = A.dots.map((d) => dot(d, A.kit, d.pos === "GK")).join("")
-      + D.dots.map((d) => dot(d, D.kit, d.pos === "GK")).join("");
-    return `<div class="fm-pitch replay"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
-      ${fmLinesSvg()}${players}
-      <circle cx="50" cy="32" r="1.15" fill="#fff" stroke="rgba(0,0,0,.45)" stroke-width="0.3"/>
-    </svg><div class="stage-note">🟢 Coup d'envoi…</div></div>`;
+    for (const ev of evs) {
+      const right = ev.side === "a";
+      const ex = clampV(ev.x, 4, 96), ey = clampV(ev.y * 0.64, 6, 58);
+      meander(last + 2.5, ev.m - 5);
+      wp.push({ m: Math.max(last + 0.6, ev.m - 3), x: clampV(ex + (right ? -20 : 20), 4, 96), y: clampV(ey + (rng() - 0.5) * 18, 6, 58) });
+      wp.push({ m: ev.m - 0.9, x: clampV(ex + (right ? -7 : 7), 4, 96), y: clampV(ey + (rng() - 0.5) * 8, 6, 58) });
+      wp.push({ m: ev.m - 0.3, x: ex, y: ey });
+      if (ev.type === "goal") { wp.push({ m: ev.m, x: right ? 99.4 : 0.6, y: 29 + rng() * 6 }); wp.push({ m: ev.m + 0.8, x: 50, y: 32 }); last = ev.m + 1.2; }
+      else if (ev.type === "saved") { wp.push({ m: ev.m, x: right ? 96.6 : 3.4, y: 29.5 + rng() * 5 }); wp.push({ m: ev.m + 1.6, x: right ? 60 - rng() * 25 : 40 + rng() * 25, y: 10 + rng() * 44 }); last = ev.m + 2; }
+      else if (ev.type === "post") { wp.push({ m: ev.m, x: right ? 98.6 : 1.4, y: rng() < 0.5 ? 26.4 : 37.6 }); wp.push({ m: ev.m + 1, x: right ? 78 : 22, y: 10 + rng() * 44 }); last = ev.m + 1.4; }
+      else { wp.push({ m: ev.m, x: right ? 99.6 : 0.4, y: rng() < 0.5 ? 16 + rng() * 5 : 43 + rng() * 5 }); wp.push({ m: ev.m + 1.3, x: right ? 90 : 10, y: 26 + rng() * 12 }); last = ev.m + 1.7; }
+    }
+    meander(last + 2.5, 88);
+    wp.push({ m: 90, x: 50, y: 32 });
+    wp.sort((a, b) => a.m - b.m);
+    return wp;
+  }
+
+  const smoothT = (t) => t * t * (3 - 2 * t);
+  function ballAt(wp, mf) {
+    if (mf <= wp[0].m) return wp[0];
+    for (let i = 1; i < wp.length; i++) {
+      if (mf <= wp[i].m) {
+        const a = wp[i - 1], b = wp[i];
+        const t = smoothT(clampV((mf - a.m) / (b.m - a.m || 0.001), 0, 1));
+        return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      }
+    }
+    return wp[wp.length - 1];
+  }
+
+  // Construit la scène (22 joueurs + ballon) et l'état de simulation.
+  function buildSim(match) {
+    const A = teamSetup(match.a, "a"), B = teamSetup(match.b, "b");
+    if (A.kit.toLowerCase() === B.kit.toLowerCase()) B.kit = "#f1f3f5";
+    const rng = mulberry(((match.a * 40503) ^ (match.b * 2654435761)) >>> 0);
+    const mk = (team, side) => team.dots.map((d) => ({
+      name: d.n, pos: d.pos, side, home: d.p,
+      w1: 0.5 + rng() * 0.9, w2: 0.5 + rng() * 0.9, ph1: rng() * 6.28, ph2: rng() * 6.28,
+    }));
+    const dots = mk(A, "a").concat(mk(B, "b"));
+    const events = (match.events || []).slice().sort((x, y) => x.m - y.m).map((ev) => ({
+      m: ev.m, type: ev.type, side: ev.side,
+      x: clampV(ev.x, 4, 96), y: clampV(ev.y * 0.64, 6, 58),
+      shooter: dots.find((d) => d.side === ev.side && d.name === ev.scorer) || null,
+    }));
+    const svgDots = dots.map((d, i) =>
+      `<circle id="sd${i}" cx="${d.home.x.toFixed(1)}" cy="${d.home.y.toFixed(1)}" r="1.7" fill="${d.side === "a" ? A.kit : B.kit}" stroke="${d.pos === "GK" ? "#ffd54a" : "rgba(255,255,255,.55)"}" stroke-width="${d.pos === "GK" ? 0.6 : 0.35}"/>`).join("");
+    $("live-stage").innerHTML = `<div class="fm-pitch replay"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
+      ${fmLinesSvg()}${svgDots}
+      <circle id="sim-ball" cx="50" cy="32" r="1.15" fill="#fff" stroke="rgba(0,0,0,.45)" stroke-width="0.3"/>
+    </svg></div>`;
+    dots.forEach((d, i) => { d.el = document.getElementById("sd" + i); });
+    return { dots, ballEl: document.getElementById("sim-ball"), timeline: buildBallTimeline(match), events };
+  }
+
+  // Une frame de simulation à la minute (continue) donnée.
+  function simTick(sim, mc) {
+    const mf = mc.minuteF;
+    const ball = ballAt(sim.timeline, mf);
+    const next = sim.events.find((e) => mf <= e.m + 0.1 && mf > e.m - 3.2);
+    const goalEv = mc.holding ? sim.events.find((e) => e.type === "goal" && e.m === mc.holding.m && e.side === mc.holding.side) : null;
+
+    // duel : le joueur de champ le plus proche du ballon, dans chaque équipe
+    let nearA = null, nearB = null, dA = 1e9, dB = 1e9;
+    for (const d of sim.dots) {
+      if (d.pos === "GK") continue;
+      const dist = Math.hypot(d.home.x - ball.x, d.home.y - ball.y);
+      if (d.side === "a" && dist < dA) { dA = dist; nearA = d; }
+      if (d.side === "b" && dist < dB) { dB = dist; nearB = d; }
+    }
+
+    for (const d of sim.dots) {
+      let x, y;
+      if (d.pos === "GK") {
+        x = d.home.x;
+        y = clampV(32 + (ball.y - 32) * 0.25, 24, 40);
+        // le gardien sort sur le tir cadré dans sa moitié
+        if (next && next.side !== d.side && (next.type === "saved") && mf > next.m - 0.5) {
+          y = clampV(ball.y, 25, 39);
+        }
+      } else {
+        const k = d.pos === "MID" ? 0.34 : d.pos === "FWD" ? 0.28 : 0.22;
+        x = d.home.x + clampV((ball.x - d.home.x) * k, -16, 16) + Math.sin(mf * d.w1 + d.ph1) * 1.5;
+        y = d.home.y + clampV((ball.y - d.home.y) * k * 0.8, -9, 9) + Math.cos(mf * d.w2 + d.ph2) * 1.3;
+        if (d === nearA || d === nearB) { x += (ball.x - x) * 0.6; y += (ball.y - y) * 0.6; }
+        if (next && next.shooter === d) {
+          const w = clampV((mf - (next.m - 3.2)) / 3, 0, 1);
+          x += (next.x - x) * w; y += (next.y - y) * w;
+        }
+        x = clampV(x, 2.5, 97.5); y = clampV(y, 3, 61);
+      }
+      // Pendant la célébration, tout est figé (mf constant) ; le buteur exulte.
+      if (goalEv && goalEv.shooter === d) {
+        d.el.setAttribute("r", (1.7 + Math.abs(Math.sin(mc.holdT * Math.PI * 3)) * 0.9).toFixed(2));
+      } else if (d.el.getAttribute("r") !== "1.7") {
+        d.el.setAttribute("r", "1.7");
+      }
+      d.el.setAttribute("cx", x.toFixed(2));
+      d.el.setAttribute("cy", y.toFixed(2));
+    }
+    sim.ballEl.setAttribute("cx", ball.x.toFixed(2));
+    sim.ballEl.setAttribute("cy", ball.y.toFixed(2));
   }
 
   // Score d'un match à la minute donnée.
@@ -579,15 +616,7 @@
       const pensEl = $("live-pens");
       if (mc.ft && featured.pens) { pensEl.style.display = ""; setText(pensEl, `Tirs au but : ${featured.pens.pa} - ${featured.pens.pb}`); }
 
-      // Replay de la dernière action : rendu uniquement quand l'action change.
       const seen = (featured.events || []).filter((e) => e.m <= mc.minute);
-      const last = seen[seen.length - 1];
-      const key = p.stage + ":" + featured.a + ":" + (last ? last.m + last.scorer + last.type : "ko");
-      if (state.replayKey !== key) {
-        state.replayKey = key;
-        $("live-stage").innerHTML = last ? actionReplay(featured, last) : kickoffStage(featured);
-      }
-
       // Célébration : l'horloge est figée sur le but -> grande animation.
       // (deux buts à la même minute enchaînent deux célébrations distinctes)
       let ovEl = document.getElementById("goal-overlay");

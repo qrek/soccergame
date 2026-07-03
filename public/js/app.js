@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v25 — inertie + équilibrage";
+  const APP_VERSION = "v26 — alchimie club + popins";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -116,7 +116,7 @@
           <div class="fut-badges"><span class="flag">${flag(pl.code)}</span><span class="price">${fmtM(price)}</span></div>
         </div>
         <div class="fut-name">${esc(pl.n)}</div>
-        <div class="fut-sub">${esc(pl.c)} · ${esc(pl.d)}${opts.chemLink ? ' · <span class="linktag">🔗 lien</span>' : ""}</div>
+        <div class="fut-sub">${esc(pl.c)} · ${esc(pl.d)}${opts.chemLink ? ` · <span class="linktag">🔗 ${opts.linkLabel || "lien"}</span>` : ""}</div>
         <div class="fut-stats">${statsHtml}</div>
       </div></div>`;
   }
@@ -342,15 +342,21 @@
   $("btn-reroll").addEventListener("click", () => api("rerollTeam"));
 
   // Dock bas : ma compo (terrain) + toutes les compos.
+  const CLOSE_X = '<button class="modal-close" aria-label="Fermer">✕</button>';
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest(".modal-close");
+    if (b) { const m = b.closest(".modal"); if (m) m.classList.remove("on"); }
+  });
+
   function openCompo() {
     const m = me();
     if (!m) return;
-    $("compo-sheet").innerHTML = renderPitch(m);
+    $("compo-sheet").innerHTML = CLOSE_X + renderPitch(m);
     $("compo-modal").classList.add("on");
   }
   function openSquads() {
     if (!state.snap) return;
-    $("squads-sheet").innerHTML = `<div class="round-title" style="margin-top:0">Toutes les compos</div>` + squadsHtml(state.snap.players);
+    $("squads-sheet").innerHTML = CLOSE_X + `<div class="round-title" style="margin-top:0">Toutes les compos</div>` + squadsHtml(state.snap.players);
     $("squads-modal").classList.add("on");
   }
   function openLiveTable() {
@@ -367,7 +373,7 @@
     const table = ENGINE.computeStandings(teams, (p.playedMatches || []).concat(current));
     const nameOf = (id) => { const pl = s0.players.find((x) => x.pid === id); return pl ? pl.teamName : "?"; };
     const K = teams.length >= 8 ? 8 : teams.length >= 4 ? 4 : 2;
-    $("table-sheet").innerHTML = `
+    $("table-sheet").innerHTML = CLOSE_X + `
       <div class="round-title" style="margin-top:0">📊 Classement live${p.type === "league" ? " · " + esc(p.stage) : " · championnat terminé"}</div>
       <table class="ltable">
         <tr><th>#</th><th style="text-align:left">Équipe</th><th>J</th><th>DIFF</th><th>PTS</th></tr>
@@ -395,6 +401,14 @@
   document.querySelectorAll(".js-compo").forEach((b) => b.addEventListener("click", openCompo));
   document.querySelectorAll(".js-squads").forEach((b) => b.addEventListener("click", openSquads));
   $("compo-modal").addEventListener("click", (e) => { if (e.target.id === "compo-modal") $("compo-modal").classList.remove("on"); });
+  // suivre un autre match du multiplex d'un tap
+  $("live-prev").addEventListener("click", (e) => {
+    const row = e.target.closest(".clickable-mx");
+    if (row && state.snap && state.snap.phase === "playing") {
+      state.watchKey = row.dataset.w;
+      renderPlaying(state.snap);
+    }
+  });
   $("squads-modal").addEventListener("click", (e) => { if (e.target.id === "squads-modal") $("squads-modal").classList.remove("on"); });
 
   // Lien d'invitation : partage natif du téléphone, sinon copie.
@@ -481,14 +495,22 @@
     $("play-stage").textContent = `${p.stage} · ${p.round}/${p.totalRounds}`;
     // Chacun suit SON match ; en mode 1 téléphone, le premier match en vedette.
     const mine = isLocal ? null : p.matches.find((m) => m.a === state.pid || m.b === state.pid);
-    const featured = mine || (isLocal ? p.matches[0] : null);
+    let featured = mine || (isLocal ? p.matches[0] : null);
+    // choix multiplex : suivre un autre match de la journée
+    if (state.watchKey) {
+      const w = p.matches.find((m) => m.a + ":" + m.b === state.watchKey);
+      if (w) featured = w;
+    }
 
     // Squelette construit une seule fois par journée : ensuite on ne met à
     // jour que les chiffres/fils, pas de reconstruction -> pas de clignotement.
     const roundKey = s.code + "|" + p.stage + "|" + p.round;
-    if (state.liveRoundKey !== roundKey) {
+    if (state.liveRoundKey !== roundKey) { state.watchKey = null; if (mine || isLocal) featured = mine || p.matches[0]; }
+    const simKey = roundKey + "|" + (featured ? featured.a + ":" + featured.b : "-");
+    if (state.liveSimKey !== simKey) {
       state.liveRoundKey = roundKey;
-      buildLiveSkeleton(p, featured, mine, isLocal);
+      state.liveSimKey = simKey;
+      buildLiveSkeleton(p, featured, mine === featured ? mine : null, isLocal);
       state.sim = featured ? buildSim(featured) : null;
     }
 
@@ -941,7 +963,7 @@
     }
 
     const others = p.matches.filter((m) => m !== featured);
-    setText($("live-prev-title"), featured ? "Multiplex — les autres matchs" : "Tous les matchs");
+    setText($("live-prev-title"), featured ? "Multiplex — touche un match pour le suivre" : "Tous les matchs");
     $("live-prev-title").style.display = others.length ? "" : "none";
     const kitOf2 = (pid) => { const pl = (state.snap.players || []).find((x) => x.pid === pid); return pl && pl.kit; };
     setHtml($("live-prev"), others.map((m) => {
@@ -949,7 +971,7 @@
       const sc = scoreAt(m, omc.minute);
       const lastGoal = goalsOf(m).filter((e) => e.m <= omc.minute).pop();
       const isMine = m.a === state.pid || m.b === state.pid;
-      return `<div class="match ${isMine ? "mymatch" : ""}">
+      return `<div class="match clickable-mx ${isMine ? "mymatch" : ""}" data-w="${m.a}:${m.b}">
         <span class="side"><span class="kit-tag">${kitSvg(kitOf2(m.a))}</span><span class="${m.a === state.pid ? "me" : ""}">${esc(m.an)}</span></span>
         <span class="score">${sc.ga}-${sc.gb}${omc.ft && m.pens ? `<span class="pens"> (${m.pens.pa}-${m.pens.pb})</span>` : ""}</span>
         <span class="side" style="justify-content:flex-end"><span class="${m.b === state.pid ? "me" : ""}">${esc(m.bn)}</span><span class="kit-tag">${kitSvg(kitOf2(m.b))}</span></span>
@@ -1097,10 +1119,14 @@
     rerollBtn.textContent = `🎲 Relancer l'équipe (${d.rerollsLeft})`;
 
     const myCountries = new Set((m0 ? m0.squad : []).map((p) => p.c));
+    const myClubs = new Set((m0 ? m0.squad : []).filter((p) => p.cl).map((p) => p.cl));
     const grid = $("cards-grid");
     grid.classList.toggle("locked", !myTurn);
-    grid.innerHTML = d.team.options.map((o) =>
-      futCard(o, { disabled: !o.eligible, chemLink: o.eligible && myCountries.has(o.c) })).join("");
+    grid.innerHTML = d.team.options.map((o) => {
+      const lc = myCountries.has(o.c), lk = o.cl && myClubs.has(o.cl);
+      return futCard(o, { disabled: !o.eligible, chemLink: o.eligible && (lc || lk),
+        linkLabel: lc && lk ? "pays+club" : lk ? "club" : "pays" });
+    }).join("");
 
     const m = me();
     $("my-squad-mini").innerHTML = (m ? m.squad : []).map((p) =>
@@ -1132,7 +1158,7 @@
     const linksSvg = chem.links.map((l) => {
       const a = chem.placement[l.i].slot, b = chem.placement[l.j].slot;
       return `<line x1="${a.x}" y1="${a.y * 1.5}" x2="${b.x}" y2="${b.y * 1.5}"
-        stroke="${l.strong ? "rgba(47,227,138,.8)" : "rgba(255,255,255,.14)"}" stroke-width="${l.strong ? 1.1 : 0.7}"/>`;
+        stroke="${l.super ? "rgba(248,231,154,.95)" : l.strong ? "rgba(47,227,138,.8)" : "rgba(255,255,255,.14)"}" stroke-width="${l.super ? 1.6 : l.strong ? 1.1 : 0.7}"/>`;
     }).join("");
 
     const tokens = chem.placement.map((slot, idx) => {
@@ -1273,7 +1299,7 @@
 
   // ---------- Modal carte (clic sur un joueur en vue résultats) ----------
   function openCardModal(player) {
-    $("card-modal-inner").innerHTML = futCard(player);
+    $("card-modal-inner").innerHTML = CLOSE_X + futCard(player);
     $("card-modal").classList.add("on");
   }
   $("card-modal").addEventListener("click", () => $("card-modal").classList.remove("on"));
@@ -1299,17 +1325,27 @@
   function matchModal(mm) {
     const evs = mm.events || [];
     const legend = Object.keys(EV_LABEL).map((k) => `<span><i style="background:${EV_COLOR[k]}"></i>${EV_LABEL[k]}</span>`).join("");
+    // Stats du match : tirs / cadrés / possession estimée
+    const st = { a: { sh: 0, on: 0 }, b: { sh: 0, on: 0 } };
+    evs.forEach((e) => { const t = st[e.side]; if (!t) return; t.sh++; if (e.type === "goal" || e.type === "saved") t.on++; });
+    const possA = Math.max(32, Math.min(68, 50 + (st.a.sh - st.b.sh) * 4));
+    const statsHtml = `<div class="ms-stats">
+      <span>${st.a.sh} tirs (${st.a.on} cadrés)</span>
+      <span class="ms-poss">${possA}% – ${100 - possA}%</span>
+      <span>${st.b.sh} tirs (${st.b.on} cadrés)</span>
+    </div>`;
     const lines = evs.length ? evs.map((ev) =>
       `<div class="evline ${ev.type === "goal" ? "goal" : ""}"><span class="min">${ev.m}'</span><span class="etxt">${esc(ev.text)}</span></div>`).join("")
       : '<p class="hint">Match sans occasion notable.</p>';
 
-    $("match-sheet").innerHTML = `
+    $("match-sheet").innerHTML = CLOSE_X + `
       <div class="ms-head">
         <span class="ms-team a">${esc(mm.an)}</span>
         <span class="ms-score">${mm.ga} - ${mm.gb}</span>
         <span class="ms-team b">${esc(mm.bn)}</span>
       </div>
       ${mm.pens ? `<div class="ms-pens">Tirs au but : ${mm.pens.pa} - ${mm.pens.pb}</div>` : ""}
+      ${statsHtml}
       ${(() => { const mo = motmOf(evs); return mo ? `<div class="ms-motm">⭐ Homme du match : ${esc(mo.name)} (${esc(mo.why)})</div>` : ""; })()}
       <div class="fm-legend">${legend}</div>
       ${fmPitchHtml(evs, 999)}

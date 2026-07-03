@@ -156,20 +156,29 @@
   }
 
   // Retourne { placement, links:[{i,j,strong}], perChem:[0..3], teamChem:0..100, bonus:0..6 }
+  // Lien entre deux joueurs : même sélection (1) + même club emblématique (1).
+  function linkScore(pa, pb) {
+    if (!pa || !pb) return 0;
+    let sc = 0;
+    if (pa.c === pb.c) sc += 1;
+    if (pa.cl && pb.cl && pa.cl === pb.cl) sc += 1;
+    return sc;
+  }
+
   function chemistry(squad, formationKey) {
     const placement = placeInSlots(squad, formationKey);
     const links = slotLinks(formationKey).map(([i, j]) => {
       const pa = placement[i] && placement[i].player;
       const pb = placement[j] && placement[j].player;
-      const strong = !!(pa && pb && pa.c === pb.c);
-      return { i, j, strong };
+      const score = linkScore(pa, pb);
+      return { i, j, score, strong: score > 0, super: score >= 2 };
     });
     const perChem = placement.map(() => 0);
-    links.forEach((l) => { if (l.strong) { perChem[l.i]++; perChem[l.j]++; } });
+    links.forEach((l) => { perChem[l.i] += l.score; perChem[l.j] += l.score; });
     for (let i = 0; i < perChem.length; i++) perChem[i] = Math.min(3, perChem[i]);
     const n = placement.filter((p) => p.player).length || 1;
     const teamChem = Math.round((perChem.reduce((s, v) => s + v, 0) / (3 * n)) * 100);
-    const bonus = Math.round((teamChem / 100) * 6);
+    const bonus = Math.round((teamChem / 100) * 8); // jusqu'à +8 (avant +6)
     return { placement, links, perChem, teamChem, bonus };
   }
 
@@ -187,7 +196,7 @@
     return v;
   }
 
-  const M = { FORMATIONS, DEFAULT_FORMATION, formationsForSize, positionCounts, computeStats, chemistry, placeInSlots, slotLinks, marketValue, BUDGET };
+  const M = { FORMATIONS, DEFAULT_FORMATION, formationsForSize, positionCounts, computeStats, chemistry, linkScore, placeInSlots, slotLinks, marketValue, BUDGET };
   if (typeof module !== "undefined" && module.exports) module.exports = M;
   else root.MODEL = M;
 })(typeof window !== "undefined" ? window : this);

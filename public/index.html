@@ -13,8 +13,8 @@
     <!-- ================= ACCUEIL ================= -->
     <section class="screen active" id="screen-home">
       <div class="home-hero">
-        <div class="logo">⚽ FOOTBALL <span>DRAFT</span></div>
-        <p class="tagline">Draftez les légendes des sélections nationales<br/>des années 50 à aujourd'hui.</p>
+        <div class="logo">FOOTBALL <span>DRAFT</span></div>
+        <p class="tagline">Draftez les légendes des sélections nationales<br/>et bâtissez votre Ultimate Team.</p>
       </div>
       <div class="home-actions">
         <input id="home-name" class="field" maxlength="16" placeholder="Ton pseudo" autocomplete="off" />
@@ -26,7 +26,7 @@
         </div>
         <p class="hint" id="home-error"></p>
       </div>
-      <footer class="home-foot">218 légendes · 24 nations · multijoueur temps réel</footer>
+      <footer class="home-foot">Multijoueur temps réel</footer>
     </section>
 
     <!-- ================= LOBBY ================= -->
@@ -42,17 +42,28 @@
           <div class="qr-note">Scanne le QR ou saisis le code pour rejoindre</div>
         </div>
 
-        <div class="config" id="host-config">
-          <div class="config-title">Taille des équipes</div>
-          <div class="size-picker" id="size-picker">
-            <button data-size="5">5</button>
-            <button data-size="7">7</button>
-            <button data-size="9">9</button>
-            <button data-size="11" class="on">11</button>
+        <!-- Personnalisation du club -->
+        <div class="config club-config">
+          <div class="config-title">Ton club</div>
+          <div class="club-row">
+            <div id="kit-preview" class="kit-preview"></div>
+            <input id="team-name" class="field team-name" maxlength="20" placeholder="Nom de l'équipe" autocomplete="off" />
           </div>
+          <div class="sub-label">Couleur principale</div>
+          <div class="swatches" id="kit-primary"></div>
+          <div class="sub-label">Couleur secondaire</div>
+          <div class="swatches" id="kit-secondary"></div>
+          <div class="sub-label">Motif du maillot</div>
+          <div class="patterns" id="kit-pattern"></div>
         </div>
 
-        <div class="players-title">Joueurs connectés (<span id="lobby-count">0</span>/8)</div>
+        <!-- Formation -->
+        <div class="config">
+          <div class="config-title">Formation</div>
+          <div class="formation-picker" id="formation-picker"></div>
+        </div>
+
+        <div class="players-title">Managers connectés (<span id="lobby-count">0</span>/8)</div>
         <ul class="player-list" id="lobby-players"></ul>
 
         <button class="btn btn-primary" id="btn-start" disabled>Démarrer le draft</button>
@@ -68,20 +79,16 @@
         <span class="timer" id="draft-timer">45</span>
       </header>
 
-      <div class="turn-banner" id="turn-banner">
-        <span id="turn-text">…</span>
-      </div>
+      <div class="turn-banner" id="turn-banner"><span id="turn-text">…</span></div>
 
       <div class="draft-team" id="draft-team">
         <div class="team-flag" id="team-flag">🏳️</div>
-        <div class="team-name" id="team-name">—</div>
-        <div class="team-sub">Équipe tirée au sort</div>
+        <div class="team-name" id="draft-team-name">—</div>
+        <div class="team-sub">Équipe tirée au sort · choisis 1 joueur</div>
       </div>
 
       <div class="need-bar" id="need-bar"></div>
-
       <div class="cards-grid" id="cards-grid"></div>
-
       <div class="my-squad-mini" id="my-squad-mini"></div>
     </section>
 
@@ -95,12 +102,14 @@
         <div class="champion-card" id="champion-card"></div>
 
         <div class="tabs">
-          <button class="tab on" data-tab="bracket">Phases finales</button>
+          <button class="tab on" data-tab="pitch">Mon terrain</button>
+          <button class="tab" data-tab="bracket">Phases finales</button>
           <button class="tab" data-tab="table">Classement</button>
           <button class="tab" data-tab="squads">Équipes</button>
         </div>
 
-        <div class="tab-panel on" id="tab-bracket"></div>
+        <div class="tab-panel on" id="tab-pitch"></div>
+        <div class="tab-panel" id="tab-bracket"></div>
         <div class="tab-panel" id="tab-table"></div>
         <div class="tab-panel" id="tab-squads"></div>
 
@@ -109,7 +118,11 @@
     </section>
   </div>
 
+  <!-- Carte joueur affichée en plein écran au clic -->
+  <div id="card-modal" class="modal"><div class="modal-inner" id="card-modal-inner"></div></div>
+
   <script src="js/qrcode.js"></script>
+  <script src="js/model.js"></script>
   <script src="data/players.js"></script>
   <script src="js/app.js"></script>
 </body>

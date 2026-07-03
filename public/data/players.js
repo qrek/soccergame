@@ -306,6 +306,72 @@ const PLAYERS = [
   { n: "Keylor Navas", c: "Costa Rica", code: "CR", pos: "GK", r: 85, d: "2020s" },
   { n: "Kasper Schmeichel", c: "Danemark", code: "DK", pos: "GK", r: 83, d: "2020s" },
   { n: "Wojciech Szczęsny", c: "Pologne", code: "PL", pos: "GK", r: 84, d: "2020s" },
+
+  // ===================== PLUS D'ÉQUIPES DE COUPE DU MONDE =====================
+  // Pérou
+  { n: "Teófilo Cubillas", c: "Pérou", code: "PE", pos: "MID", r: 87, d: "1970s" },
+  { n: "Héctor Chumpitaz", c: "Pérou", code: "PE", pos: "DEF", r: 82, d: "1970s" },
+  { n: "Paolo Guerrero", c: "Pérou", code: "PE", pos: "FWD", r: 82, d: "2010s" },
+  // Chili
+  { n: "Elías Figueroa", c: "Chili", code: "CL", pos: "DEF", r: 87, d: "1970s" },
+  { n: "Iván Zamorano", c: "Chili", code: "CL", pos: "FWD", r: 85, d: "1990s" },
+  { n: "Marcelo Salas", c: "Chili", code: "CL", pos: "FWD", r: 85, d: "2000s" },
+  { n: "Alexis Sánchez", c: "Chili", code: "CL", pos: "FWD", r: 86, d: "2010s" },
+  { n: "Arturo Vidal", c: "Chili", code: "CL", pos: "MID", r: 86, d: "2010s" },
+  { n: "Claudio Bravo", c: "Chili", code: "CL", pos: "GK", r: 84, d: "2010s" },
+  // Colombie
+  { n: "Carlos Valderrama", c: "Colombie", code: "CO", pos: "MID", r: 87, d: "1990s" },
+  { n: "Faustino Asprilla", c: "Colombie", code: "CO", pos: "FWD", r: 84, d: "1990s" },
+  { n: "René Higuita", c: "Colombie", code: "CO", pos: "GK", r: 82, d: "1990s" },
+  { n: "James Rodríguez", c: "Colombie", code: "CO", pos: "MID", r: 86, d: "2010s" },
+  { n: "Radamel Falcao", c: "Colombie", code: "CO", pos: "FWD", r: 87, d: "2010s" },
+  // Paraguay
+  { n: "José Luis Chilavert", c: "Paraguay", code: "PY", pos: "GK", r: 85, d: "2000s" },
+  { n: "Roque Santa Cruz", c: "Paraguay", code: "PY", pos: "FWD", r: 82, d: "2000s" },
+  // Turquie
+  { n: "Rüştü Reçber", c: "Turquie", code: "TR", pos: "GK", r: 84, d: "2000s" },
+  { n: "Hakan Şükür", c: "Turquie", code: "TR", pos: "FWD", r: 84, d: "2000s" },
+  // Corée du Sud
+  { n: "Park Ji-sung", c: "Corée du Sud", code: "KR", pos: "MID", r: 84, d: "2000s" },
+  { n: "Hong Myung-bo", c: "Corée du Sud", code: "KR", pos: "DEF", r: 82, d: "2000s" },
+  // Serbie / Yougoslavie
+  { n: "Dragan Džajić", c: "Yougoslavie", code: "RS", pos: "FWD", r: 86, d: "1970s" },
+  { n: "Dejan Savićević", c: "Yougoslavie", code: "RS", pos: "MID", r: 86, d: "1990s" },
+  { n: "Nemanja Vidić", c: "Serbie", code: "RS", pos: "DEF", r: 87, d: "2010s" },
+  { n: "Dušan Tadić", c: "Serbie", code: "RS", pos: "MID", r: 83, d: "2020s" },
+  // Suisse
+  { n: "Xherdan Shaqiri", c: "Suisse", code: "CH", pos: "MID", r: 83, d: "2010s" },
+  { n: "Granit Xhaka", c: "Suisse", code: "CH", pos: "MID", r: 83, d: "2020s" },
+  // Australie
+  { n: "Tim Cahill", c: "Australie", code: "AU", pos: "FWD", r: 82, d: "2010s" },
+  { n: "Mark Schwarzer", c: "Australie", code: "AU", pos: "GK", r: 82, d: "2010s" },
+  // Nigeria
+  { n: "Rashidi Yekini", c: "Nigeria", code: "NG", pos: "FWD", r: 83, d: "1990s" },
+  { n: "Finidi George", c: "Nigeria", code: "NG", pos: "MID", r: 82, d: "1990s" },
+  // Algérie
+  { n: "Rabah Madjer", c: "Algérie", code: "DZ", pos: "FWD", r: 84, d: "1980s" },
+  { n: "Lakhdar Belloumi", c: "Algérie", code: "DZ", pos: "MID", r: 83, d: "1980s" },
+  // Ghana
+  { n: "Asamoah Gyan", c: "Ghana", code: "GH", pos: "FWD", r: 83, d: "2010s" },
+  // Maroc
+  { n: "Hakim Ziyech", c: "Maroc", code: "MA", pos: "MID", r: 84, d: "2020s" },
+  { n: "Yassine Bounou", c: "Maroc", code: "MA", pos: "GK", r: 84, d: "2020s" },
+  // Écosse
+  { n: "Kenny Dalglish", c: "Écosse", code: "GB", pos: "FWD", r: 88, d: "1980s" },
+  { n: "Denis Law", c: "Écosse", code: "GB", pos: "FWD", r: 87, d: "1970s" },
+  // Pays de Galles
+  { n: "Ian Rush", c: "Pays de Galles", code: "GB", pos: "FWD", r: 85, d: "1990s" },
+  { n: "Gareth Bale", c: "Pays de Galles", code: "GB", pos: "FWD", r: 88, d: "2010s" },
+  { n: "Ryan Giggs", c: "Pays de Galles", code: "GB", pos: "MID", r: 87, d: "2000s" },
+  // Irlande
+  { n: "Roy Keane", c: "Irlande", code: "IE", pos: "MID", r: 87, d: "2000s" },
+  { n: "Robbie Keane", c: "Irlande", code: "IE", pos: "FWD", r: 82, d: "2000s" },
+  // Autriche
+  { n: "David Alaba", c: "Autriche", code: "AT", pos: "DEF", r: 85, d: "2020s" },
+  // Équateur
+  { n: "Antonio Valencia", c: "Équateur", code: "EC", pos: "MID", r: 82, d: "2010s" },
+  // Grèce
+  { n: "Theodoros Zagorakis", c: "Grèce", code: "GR", pos: "MID", r: 82, d: "2000s" },
 ];
 
 if (typeof module !== "undefined" && module.exports) {

@@ -11,12 +11,14 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const engine = require("./game/engine");
+const MODEL = require("./public/js/model.js");
 
 const RAW_PLAYERS = require("./public/data/players.js");
 const PLAYERS = RAW_PLAYERS.map((p, i) => ({ id: i, ...p }));
 
 const PORT = process.env.PORT || 3000;
 const TURN_SECONDS = 45;
+const SQUAD_SIZE = 11; // toutes les équipes ont 11 joueurs
 const PUBLIC_DIR = path.join(__dirname, "public");
 
 // ---------------------------------------------------------------------------
@@ -39,12 +41,11 @@ function createRoom() {
   const room = {
     code,
     phase: "lobby",
-    players: [],       // { pid, name, connected, squad: [] }
+    players: [],       // { pid, name, connected, squad: [], formationKey }
     clients: new Map(), // pid -> res (flux SSE)
     nextPid: 1,
     hostPid: null,
-    squadSize: 11,
-    formation: engine.formationFor(11),
+    squadSize: SQUAD_SIZE,
     draft: null,
     tournament: null,
     turnTimer: null,
@@ -57,11 +58,12 @@ const playerByPid = (room, pid) => room.players.find((p) => p.pid === pid);
 const squadPlayers = (room, player) => player.squad.map((id) => PLAYERS[id]);
 
 function neededPositions(room, player) {
+  const counts = MODEL.positionCounts(player.formationKey);
   const have = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
   squadPlayers(room, player).forEach((p) => have[p.pos]++);
   const need = {};
   for (const pos of ["GK", "DEF", "MID", "FWD"]) {
-    const rem = room.formation[pos] - have[pos];
+    const rem = counts[pos] - have[pos];
     if (rem > 0) need[pos] = rem;
   }
   return need;
@@ -79,14 +81,20 @@ function draftedIds(room) {
 function snapshot(room) {
   const players = room.players.map((p) => {
     const sp = squadPlayers(room, p);
+    const chem = MODEL.chemistry(sp, p.formationKey);
     return {
       pid: p.pid,
       name: p.name,
       connected: p.connected,
       isHost: p.pid === room.hostPid,
+      formationKey: p.formationKey,
+      teamName: p.teamName || p.name,
+      kit: p.kit,
       squad: sp,
       squadCount: sp.length,
       strength: engine.teamStrength(sp),
+      chem: chem.teamChem,
+      chemBonus: chem.bonus,
     };
   });
 
@@ -95,7 +103,6 @@ function snapshot(room) {
     phase: room.phase,
     hostPid: room.hostPid,
     squadSize: room.squadSize,
-    formation: room.formation,
     players,
   };
 
@@ -142,7 +149,7 @@ function startDraft(room) {
   room.players.forEach((p) => (p.squad = []));
   const pids = room.players.map((p) => p.pid);
   const order = [];
-  for (let r = 0; r < room.squadSize; r++) {
+  for (let r = 0; r < SQUAD_SIZE; r++) {
     order.push(...(r % 2 === 0 ? pids : pids.slice().reverse()));
   }
   room.draft = { order, pickNum: 0, currentPid: order[0], currentTeam: null, deadline: 0 };
@@ -225,7 +232,11 @@ function finishDraft(room) {
   room.phase = "results";
   clearTimeout(room.turnTimer);
 
-  const teams = room.players.map((p) => ({ id: p.pid, name: p.name, players: squadPlayers(room, p) }));
+  const teams = room.players.map((p) => {
+    const sp = squadPlayers(room, p);
+    const chem = MODEL.chemistry(sp, p.formationKey);
+    return { id: p.pid, name: p.teamName || p.name, players: sp, bonus: chem.bonus, chem: chem.teamChem };
+  });
   const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));
 
   const rounds = engine.roundRobin(teams.map((t) => t.id));
@@ -280,8 +291,20 @@ function buildKnockout(standings, teamById, K) {
 // ---------------------------------------------------------------------------
 // Actions (POST /api)
 // ---------------------------------------------------------------------------
+const KIT_PALETTE = ["#e11d2a", "#1f6feb", "#12b886", "#f59f00", "#7048e8", "#111418", "#f1f3f5", "#e64980", "#0b7285", "#495057"];
+const KIT_PATTERNS = ["plain", "stripes", "hoops", "sash", "halves"];
+
 function joinRoomInternal(room, name) {
-  const player = { pid: room.nextPid++, name: String(name || "Joueur").slice(0, 16), connected: false, squad: [] };
+  const idx = room.players.length;
+  const player = {
+    pid: room.nextPid++,
+    name: String(name || "Joueur").slice(0, 16),
+    connected: false,
+    squad: [],
+    formationKey: "4-3-3",
+    teamName: "",
+    kit: { p: KIT_PALETTE[idx % KIT_PALETTE.length], s: "#ffffff", pat: "plain" },
+  };
   room.players.push(player);
   return player;
 }
@@ -302,14 +325,32 @@ const ACTIONS = {
     const player = joinRoomInternal(room, msg.name);
     return { ok: true, code: room.code, pid: player.pid };
   },
-  setSquadSize(msg) {
+  setFormation(msg) {
     const room = rooms.get(msg.code);
-    if (!room || room.phase !== "lobby" || msg.pid !== room.hostPid) return { ok: false };
-    if (engine.FORMATIONS[msg.size]) {
-      room.squadSize = msg.size;
-      room.formation = engine.formationFor(msg.size);
+    if (!room || room.phase !== "lobby") return { ok: false };
+    const player = playerByPid(room, msg.pid);
+    if (!player) return { ok: false };
+    if (MODEL.FORMATIONS[msg.formationKey] && MODEL.FORMATIONS[msg.formationKey].size === SQUAD_SIZE) {
+      player.formationKey = msg.formationKey;
       broadcast(room);
     }
+    return { ok: true };
+  },
+  setTeam(msg) {
+    const room = rooms.get(msg.code);
+    if (!room || room.phase !== "lobby") return { ok: false };
+    const player = playerByPid(room, msg.pid);
+    if (!player) return { ok: false };
+    if (typeof msg.teamName === "string") player.teamName = msg.teamName.slice(0, 20);
+    if (msg.kit && typeof msg.kit === "object") {
+      const p = String(msg.kit.p || "").slice(0, 7);
+      const s = String(msg.kit.s || "").slice(0, 7);
+      const pat = KIT_PATTERNS.includes(msg.kit.pat) ? msg.kit.pat : "plain";
+      if (/^#[0-9a-fA-F]{6}$/.test(p)) player.kit.p = p;
+      if (/^#[0-9a-fA-F]{6}$/.test(s)) player.kit.s = s;
+      player.kit.pat = pat;
+    }
+    broadcast(room);
     return { ok: true };
   },
   startGame(msg) {

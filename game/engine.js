@@ -63,6 +63,10 @@ function simulateMatch(teamA, teamB, seed) {
   const rng = makeRng(seed);
   const sa = teamStrength(teamA.players);
   const sb = teamStrength(teamB.players);
+  // Bonus d'alchimie : renforce attaque et défense.
+  const ba = teamA.bonus || 0, bb = teamB.bonus || 0;
+  sa.atk += ba; sa.def += ba;
+  sb.atk += bb; sb.def += bb;
   // Espérance de buts : attaque de l'un vs défense de l'autre, autour de ~1.4 buts.
   const lamA = Math.max(0.2, 1.4 * Math.pow(2, (sa.atk - sb.def) / 12));
   const lamB = Math.max(0.2, 1.4 * Math.pow(2, (sb.atk - sa.def) / 12));

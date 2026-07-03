@@ -283,6 +283,7 @@
     clearInterval(timerInterval);
     state.mode = "view";
     const t = s.tournament; if (!t) return;
+    state.matchMap = new Map();
 
     const champ = t.champion;
     const champTeam = champ && s.players.find((p) => p.pid === champ.id);
@@ -300,15 +301,17 @@
     if (t.knockout) {
       t.knockout.rounds.forEach((round, i) => {
         bracket += `<div class="round-title">${roundNames(t.knockout.rounds.length - i)}</div>`;
-        round.forEach((mm) => {
+        round.forEach((mm, j) => {
+          const mk = `k${i}_${j}`; state.matchMap.set(mk, mm);
           const aw = mm.winner === mm.a, bw = mm.winner === mm.b;
-          bracket += `<div class="match">
+          bracket += `<div class="match clickable" data-mk="${mk}">
             <span class="side ${aw ? "win" : "lose"}"><span>${esc(mm.an)}</span></span>
             <span class="score">${mm.ga}-${mm.gb}${mm.pens ? `<span class="pens"> (${mm.pens.pa}-${mm.pens.pb} tab)</span>` : ""}</span>
             <span class="side ${bw ? "win" : "lose"}" style="justify-content:flex-end"><span>${esc(mm.bn)}</span></span>
           </div>`;
         });
       });
+      bracket += '<p class="ms-note">Touche un match pour voir les temps forts ⚽</p>';
     } else bracket = '<p class="hint">Pas assez d\'équipes pour des phases finales.</p>';
     $("tab-bracket").innerHTML = bracket;
 
@@ -318,7 +321,13 @@
       ${t.standings.map((r, i) => `<tr class="${i < K ? "qualif" : ""}">
         <td class="rk">${i + 1}</td><td class="tname">${esc(r.name)}${r.id === state.pid ? '<span class="you-tag">TOI</span>' : ""}</td>
         <td>${r.played}</td><td>${r.w}</td><td>${r.d}</td><td>${r.l}</td>
-        <td>${r.gd > 0 ? "+" : ""}${r.gd}</td><td class="pts">${r.pts}</td></tr>`).join("")}</table>`;
+        <td>${r.gd > 0 ? "+" : ""}${r.gd}</td><td class="pts">${r.pts}</td></tr>`).join("")}</table>
+      <div class="round-title">Matchs de poule</div>
+      ${(t.matches || []).map((mm, idx) => { const mk = `l${idx}`; state.matchMap.set(mk, mm);
+        return `<div class="match clickable" data-mk="${mk}">
+          <span class="side"><span>${esc(mm.an)}</span></span>
+          <span class="score">${mm.ga}-${mm.gb}</span>
+          <span class="side" style="justify-content:flex-end"><span>${esc(mm.bn)}</span></span></div>`; }).join("")}`;
 
     $("tab-squads").innerHTML = s.players.map((p) => {
       const sorted = p.squad.slice().sort((a, b) => ord(a.pos) - ord(b.pos) || b.r - a.r);
@@ -351,6 +360,46 @@
     if (!isNaN(id) && typeof PLAYERS !== "undefined") { const pl = PLAYERS[id]; if (pl) openCardModal(Object.assign({ id }, pl)); }
   });
 
+  // ---------- Feuille de match (temps forts + visuel FM) ----------
+  const EV_COLOR = { goal: "#2fe38a", saved: "#14a0ff", off: "#8aa3ba", post: "#f0b429" };
+  const EV_LABEL = { goal: "But", saved: "Arrêt", off: "Tir manqué", post: "Poteau" };
+
+  function matchModal(mm) {
+    const evs = mm.events || [];
+    const dots = evs.map((ev) =>
+      `<circle class="fm-dot" cx="${ev.x}" cy="${ev.y * 0.64}" r="${ev.type === "goal" ? 3 : 2.1}" fill="${EV_COLOR[ev.type]}"/>`).join("");
+    const legend = Object.keys(EV_LABEL).map((k) => `<span><i style="background:${EV_COLOR[k]}"></i>${EV_LABEL[k]}</span>`).join("");
+    const lines = evs.length ? evs.map((ev) =>
+      `<div class="evline ${ev.type === "goal" ? "goal" : ""}"><span class="min">${ev.m}'</span><span class="etxt">${esc(ev.text)}</span></div>`).join("")
+      : '<p class="hint">Match sans occasion notable.</p>';
+
+    $("match-sheet").innerHTML = `
+      <div class="ms-head">
+        <span class="ms-team a">${esc(mm.an)}</span>
+        <span class="ms-score">${mm.ga} - ${mm.gb}</span>
+        <span class="ms-team b">${esc(mm.bn)}</span>
+      </div>
+      ${mm.pens ? `<div class="ms-pens">Tirs au but : ${mm.pens.pa} - ${mm.pens.pb}</div>` : ""}
+      <div class="fm-legend">${legend}</div>
+      <div class="fm-pitch"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
+        <g fill="none" stroke="rgba(255,255,255,.28)" stroke-width="0.5">
+          <rect x="1.5" y="1.5" width="97" height="61"/>
+          <line x1="50" y1="1.5" x2="50" y2="62.5"/><circle cx="50" cy="32" r="9"/>
+          <rect x="1.5" y="18" width="12" height="28"/><rect x="86.5" y="18" width="12" height="28"/>
+        </g>${dots}
+      </svg></div>
+      <div class="fm-events">${lines}</div>
+      <p class="ms-note">Les frappes citent la note de tir du joueur et la défense adverse : c'est ainsi que l'algorithme départage les équipes.</p>`;
+    $("match-modal").classList.add("on");
+  }
+  $("match-modal").addEventListener("click", (e) => { if (e.target.id === "match-modal") $("match-modal").classList.remove("on"); });
+  document.addEventListener("click", (e) => {
+    const row = e.target.closest(".match.clickable");
+    if (!row || !state.matchMap) return;
+    const mm = state.matchMap.get(row.dataset.mk);
+    if (mm) matchModal(mm);
+  });
+
   // ---------- QR ----------
   function renderQR(text) {
     const m = QRCode.matrix(text), n = m.length, q = 2, size = n + q * 2;
@@ -375,7 +424,14 @@
   function boot() {
     const params = new URLSearchParams(location.search);
     const mock = params.get("mock");
-    if (mock) { document.body.classList.add("no-anim"); fetch("/_mock/" + mock + ".json").then((r) => r.json()).then((d) => { state.code = d.snap.code; state.pid = d.viewPid; state.snap = d.snap; render(); }); return; }
+    if (mock) {
+      document.body.classList.add("no-anim");
+      fetch("/_mock/" + mock + ".json").then((r) => r.json()).then((d) => {
+        state.code = d.snap.code; state.pid = d.viewPid; state.snap = d.snap; render();
+        if (params.get("open") && state.matchMap && state.matchMap.size) matchModal(state.matchMap.values().next().value);
+      });
+      return;
+    }
 
     const roomParam = (params.get("room") || params.get("code") || "").toUpperCase();
     if (roomParam) $("home-code").value = roomParam;

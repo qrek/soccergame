@@ -244,7 +244,7 @@ function finishDraft(room) {
   rounds.forEach((round, ri) => {
     round.forEach(([a, b]) => {
       const res = engine.simulateMatch(teamById[a], teamById[b], seedFor(a, b, ri + 1));
-      matches.push({ a, b, ga: res.ga, gb: res.gb, round: ri + 1 });
+      matches.push({ a, b, ga: res.ga, gb: res.gb, round: ri + 1, events: res.events });
     });
   });
   const standings = engine.computeStandings(teams, matches);
@@ -277,7 +277,7 @@ function buildKnockout(standings, teamById, K) {
     const winners = [];
     for (const [a, b] of current) {
       const res = engine.simulateKnockout(teamById[a], teamById[b], seedFor(a, b, salt++));
-      roundMatches.push({ a, b, an: nameOf(a), bn: nameOf(b), ga: res.ga, gb: res.gb, pens: res.pens, winner: res.winner });
+      roundMatches.push({ a, b, an: nameOf(a), bn: nameOf(b), ga: res.ga, gb: res.gb, pens: res.pens, winner: res.winner, events: res.events });
       winners.push(res.winner);
     }
     roundsOut.push(roundMatches);

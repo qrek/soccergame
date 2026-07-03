@@ -234,3 +234,25 @@ body {
 
 /* Désactive les animations en mode démo/capture. */
 .no-anim *, .no-anim { animation: none !important; transition: none !important; }
+
+/* ============ Feuille de match (temps forts façon FM) ============ */
+.match-sheet { width: 100%; max-width: 460px; max-height: 88vh; overflow-y: auto; background: #0a2138; border: 1px solid var(--panel-b); border-radius: 18px; padding: 16px; box-shadow: var(--shadow); }
+.ms-head { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 4px; }
+.ms-head .ms-team { font-weight: 800; font-size: 15px; flex: 1; }
+.ms-head .ms-team.a { text-align: right; }
+.ms-head .ms-score { font-size: 26px; font-weight: 900; }
+.ms-pens { text-align: center; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.fm-pitch { position: relative; width: 100%; aspect-ratio: 1.56; border-radius: 12px; overflow: hidden; margin: 10px 0;
+  background: repeating-linear-gradient(90deg, #1f8a4c 0 12.5%, #1a7a43 12.5% 25%); border: 1px solid rgba(255,255,255,.15); }
+.fm-pitch svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.fm-dot { stroke: rgba(0,0,0,.4); stroke-width: .5; }
+.fm-legend { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; font-size: 11px; color: var(--muted); margin-bottom: 10px; }
+.fm-legend span { display: flex; align-items: center; gap: 5px; }
+.fm-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.evline { display: flex; gap: 8px; padding: 8px 6px; border-top: 1px solid var(--panel-b); font-size: 13px; align-items: baseline; }
+.evline .min { font-weight: 900; color: var(--accent); width: 34px; flex-shrink: 0; }
+.evline.goal { background: rgba(47,227,138,.08); }
+.evline .etxt { flex: 1; line-height: 1.35; }
+.ms-note { font-size: 11px; color: var(--muted); text-align: center; margin-top: 10px; font-style: italic; }
+.match.clickable { cursor: pointer; }
+.match.clickable:active { transform: scale(.99); }

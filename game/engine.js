@@ -50,12 +50,66 @@ function makeRng(seed) {
   };
 }
 
+const MODEL = require("../public/js/model.js");
+
 // Buts marqués par une attaque contre une défense (loi de Poisson).
 function poisson(lambda, rng) {
   const L = Math.exp(-lambda);
   let k = 0, p = 1;
   do { k++; p *= rng(); } while (p > L);
   return k - 1;
+}
+
+// Choisit un tireur pondéré par le poste et la note (les attaquants tirent plus).
+function pickShooter(players, rng) {
+  const outfield = players.filter((p) => p.pos !== "GK");
+  const pool = outfield.length ? outfield : players;
+  const weights = pool.map((p) => (p.pos === "FWD" ? 5 : p.pos === "MID" ? 3 : p.pos === "DEF" ? 1 : 0.2) * (p.r / 100));
+  let total = weights.reduce((s, w) => s + w, 0), r = rng() * total;
+  for (let i = 0; i < pool.length; i++) { r -= weights[i]; if (r <= 0) return pool[i]; }
+  return pool[pool.length - 1];
+}
+
+const shoOf = (p) => { const s = MODEL.computeStats(p).find((x) => x.label === "SHO"); return s ? s.value : p.r; };
+
+// Génère les occasions d'une équipe : les buts + quelques tirs ratés/arrêtés.
+function teamChances(att, def, goals, side, defStrength, rng) {
+  const gk = def.players.find((p) => p.pos === "GK");
+  const gkName = gk ? gk.n : "le gardien";
+  const extra = Math.min(4, 1 + poisson(1.1, rng));
+  const total = Math.min(7, goals + extra);
+  const evs = [];
+  for (let i = 0; i < total; i++) {
+    const shooter = pickShooter(att.players, rng);
+    let type;
+    if (i < goals) type = "goal";
+    else { const r = rng(); type = r < 0.5 ? "saved" : r < 0.85 ? "off" : "post"; }
+    evs.push({ side, type, scorer: shooter.n, code: shooter.code, sho: shoOf(shooter), gkName, defR: defStrength.def, teamName: att.name });
+  }
+  return evs;
+}
+
+function commentary(ev) {
+  const short = ev.scorer.split(" ").slice(-1)[0];
+  switch (ev.type) {
+    case "goal": return `⚽ BUT ! ${ev.scorer} (${ev.teamName}) conclut. Frappe ${ev.sho} face à une défense à ${ev.defR}.`;
+    case "saved": return `🧤 ${ev.gkName} repousse la frappe de ${short} (tir ${ev.sho} vs défense ${ev.defR}).`;
+    case "post": return `🪵 ${short} trouve le poteau ! (tir ${ev.sho})`;
+    default: return `❌ ${short} manque le cadre (tir ${ev.sho} vs défense ${ev.defR}).`;
+  }
+}
+
+// Attribue minute + position sur le terrain (FM : A attaque à droite, B à gauche).
+function finalizeEvents(rawA, rawB, rng) {
+  const all = rawA.concat(rawB).map((ev) => {
+    const attackRight = ev.side === "a";
+    const goalish = ev.type === "goal" || ev.type === "post";
+    const x = attackRight ? (goalish ? 82 + rng() * 12 : 62 + rng() * 28) : (goalish ? 6 + rng() * 12 : 10 + rng() * 28);
+    const y = 18 + rng() * 64;
+    return Object.assign(ev, { m: 1 + Math.floor(rng() * 89), x: Math.round(x), y: Math.round(y) });
+  });
+  all.sort((p, q) => p.m - q.m);
+  return all.map((ev) => Object.assign(ev, { text: commentary(ev) }));
 }
 
 // Simule un match entre deux équipes. seed rend le résultat reproductible.
@@ -72,7 +126,12 @@ function simulateMatch(teamA, teamB, seed) {
   const lamB = Math.max(0.2, 1.4 * Math.pow(2, (sb.atk - sa.def) / 12));
   let ga = poisson(lamA, rng);
   let gb = poisson(lamB, rng);
-  return { ga, gb };
+  const events = finalizeEvents(
+    teamChances(teamA, teamB, ga, "a", sb, rng),
+    teamChances(teamB, teamA, gb, "b", sa, rng),
+    rng
+  );
+  return { ga, gb, events };
 }
 
 // Simule un match à élimination directe : pas de nul, tirs au but si égalité.

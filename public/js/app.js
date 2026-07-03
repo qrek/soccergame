@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v12 — draft revu";
+  const APP_VERSION = "v13 — scoreboard maillots";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -399,13 +399,14 @@
   }
 
   function buildLiveSkeleton(p, featured, mine, isLocal) {
+    const kitOf = (pid) => { const pl = (state.snap.players || []).find((x) => x.pid === pid); return pl && pl.kit; };
     if (featured) {
       $("live-card").innerHTML = `
         <div class="lc-stage">${esc(p.stage)} · ${mine ? "TON MATCH" : "MATCH VEDETTE"} <span class="live-min" id="live-min">0'</span></div>
         <div class="lc-row">
-          <span class="lc-team">${esc(featured.an)}</span>
+          <span class="lc-team"><span class="lc-kit">${kitSvg(kitOf(featured.a))}</span><span class="lc-tname">${esc(featured.an)}</span></span>
           <span class="lc-score"><span id="live-ga">0</span> - <span id="live-gb">0</span></span>
-          <span class="lc-team">${esc(featured.bn)}</span>
+          <span class="lc-team"><span class="lc-kit">${kitSvg(kitOf(featured.b))}</span><span class="lc-tname">${esc(featured.bn)}</span></span>
         </div>
         <div class="lc-pens" id="live-pens" style="display:none"></div>`;
     } else {
@@ -613,14 +614,15 @@
     const others = p.matches.filter((m) => m !== featured);
     setText($("live-prev-title"), featured ? "Multiplex — les autres matchs" : "Tous les matchs");
     $("live-prev-title").style.display = others.length ? "" : "none";
+    const kitOf2 = (pid) => { const pl = (state.snap.players || []).find((x) => x.pid === pid); return pl && pl.kit; };
     setHtml($("live-prev"), others.map((m) => {
       const omc = matchClock(elapsed, goalsOf(m), p.clockMs, hold);
       const sc = scoreAt(m, omc.minute);
       const lastGoal = goalsOf(m).filter((e) => e.m <= omc.minute).pop();
       return `<div class="match">
-        <span class="side"><span>${esc(m.an)}</span></span>
+        <span class="side"><span class="kit-tag">${kitSvg(kitOf2(m.a))}</span><span>${esc(m.an)}</span></span>
         <span class="score">${sc.ga}-${sc.gb}${omc.ft && m.pens ? `<span class="pens"> (${m.pens.pa}-${m.pens.pb})</span>` : ""}</span>
-        <span class="side" style="justify-content:flex-end"><span>${esc(m.bn)}</span></span>
+        <span class="side" style="justify-content:flex-end"><span>${esc(m.bn)}</span><span class="kit-tag">${kitSvg(kitOf2(m.b))}</span></span>
       </div>${lastGoal && !omc.ft ? `<div class="mplex-last">⚽ ${lastGoal.m}' ${esc(lastGoal.scorer)}</div>` : ""}`;
     }).join(""));
 
@@ -728,9 +730,9 @@
       return `<span class="order-chip ${pid === d.currentPid ? "on" : ""}">${esc(pl ? pl.teamName : "?")}</span>`;
     }).join('<span class="order-sep">›</span>'));
 
-    // Budget, alchimie et postes restants : TOUJOURS les siens.
+    // Budget et postes restants : TOUJOURS les siens, bien mis en avant.
     const m0 = me();
-    let myChips = "";
+    let panel = "";
     if (m0) {
       const spent = (m0.squad || []).reduce((t, p) => t + MODEL.marketValue(p), 0);
       const left = Math.max(0, Math.round((MODEL.BUDGET - spent) * 10) / 10);
@@ -739,12 +741,21 @@
       m0.squad.forEach((p) => have[p.pos]++);
       const needChips = ["GK", "DEF", "MID", "FWD"]
         .filter((pos) => counts[pos] - have[pos] > 0)
-        .map((pos) => `<span class="need-chip">${pos} <b>×${counts[pos] - have[pos]}</b></span>`).join("");
-      myChips = `<span class="need-chip budget-chip">💰 <b>${fmtM(left)}</b> / ${fmtM(MODEL.BUDGET)}</span>`
-        + `<span class="need-chip chem-chip">🔗 Alchimie <b>${MODEL.chemistry(m0.squad, m0.formationKey).teamChem}</b></span>`
-        + (needChips || '<span class="need-chip">Effectif complet ✓</span>');
+        .map((pos) => `<span class="ms-chip">${pos} <b>×${counts[pos] - have[pos]}</b></span>`).join("");
+      panel = `<div class="my-status ${myTurn ? "mine" : ""}">
+        <div>
+          <div class="ms-label">💰 Ton budget restant</div>
+          <div class="ms-value ${left < 40 ? "low" : ""}">${fmtM(left)}</div>
+          <div class="ms-bar"><i style="width:${Math.max(2, (left / MODEL.BUDGET) * 100).toFixed(0)}%"></i></div>
+          <div class="ms-chem">🔗 Alchimie ${MODEL.chemistry(m0.squad, m0.formationKey).teamChem}</div>
+        </div>
+        <div>
+          <div class="ms-label">Tes postes à pourvoir</div>
+          <div class="ms-chips">${needChips || '<span class="ms-chip done">✓ Effectif complet</span>'}</div>
+        </div>
+      </div>`;
     }
-    $("need-bar").innerHTML = myChips;
+    $("need-bar").innerHTML = panel;
 
     // Relance d'équipe : visible seulement à son tour, avec le compteur.
     const rerollBtn = $("btn-reroll");

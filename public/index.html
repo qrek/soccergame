@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#04121f" />
   <title>Football Draft — Ultimate National Teams</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
-  <link rel="stylesheet" href="css/styles.css?v=18" />
+  <link rel="stylesheet" href="css/styles.css?v=19" />
 </head>
 <body>
   <div id="app">
@@ -92,6 +92,7 @@
       <header class="topbar">
         <span class="brand">DRAFT</span>
         <span class="draft-progress"><b id="draft-pick">0</b>/<span id="draft-total">0</span></span>
+        <button class="icon-btn js-sound"><span class="snd-ico">🔊</span></button>
         <span class="timer" id="draft-timer">10</span>
       </header>
 
@@ -113,7 +114,6 @@
       <div class="dock">
         <button class="dock-btn js-compo"><span class="dock-ico">👥</span><span class="dock-lbl">Ma compo</span></button>
         <button class="dock-btn js-squads"><span class="dock-ico">📋</span><span class="dock-lbl">Compos</span></button>
-        <button class="dock-btn js-sound"><span class="dock-ico snd-ico">🔊</span><span class="dock-lbl">Son</span></button>
         <button class="dock-btn js-reset"><span class="dock-ico">🔄</span><span class="dock-lbl">Reset</span></button>
       </div>
     </section>
@@ -123,6 +123,7 @@
       <header class="topbar">
         <span class="brand">🔴 EN DIRECT</span>
         <span class="room-pill" id="play-stage">—</span>
+        <button class="icon-btn js-sound"><span class="snd-ico">🔊</span></button>
       </header>
       <div class="play-body">
         <div class="live-card" id="live-card"></div>
@@ -137,7 +138,6 @@
         <button class="dock-btn js-compo"><span class="dock-ico">👥</span><span class="dock-lbl">Ma compo</span></button>
         <button class="dock-btn js-table"><span class="dock-ico">📊</span><span class="dock-lbl">Classement</span></button>
         <button class="dock-btn js-squads"><span class="dock-ico">📋</span><span class="dock-lbl">Compos</span></button>
-        <button class="dock-btn js-sound"><span class="dock-ico snd-ico">🔊</span><span class="dock-lbl">Son</span></button>
         <button class="dock-btn js-reset"><span class="dock-ico">🔄</span><span class="dock-lbl">Reset</span></button>
       </div>
     </section>
@@ -184,10 +184,10 @@
   <!-- Feuille de match (temps forts + visuel façon FM) -->
   <div id="match-modal" class="modal"><div class="match-sheet" id="match-sheet"></div></div>
 
-  <script src="js/qrcode.js?v=18"></script>
-  <script src="js/model.js?v=18"></script>
-  <script src="js/engine.js?v=18"></script>
-  <script src="data/players.js?v=18"></script>
-  <script src="js/app.js?v=18"></script>
+  <script src="js/qrcode.js?v=19"></script>
+  <script src="js/model.js?v=19"></script>
+  <script src="js/engine.js?v=19"></script>
+  <script src="data/players.js?v=19"></script>
+  <script src="js/app.js?v=19"></script>
 </body>
 </html>

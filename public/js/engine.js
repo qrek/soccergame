@@ -41,11 +41,16 @@
     return k - 1;
   }
 
-  // Choisit un tireur pondéré par le poste et la note.
+  // Choisit un tireur de façon cohérente : les attaquants finissent les
+  // actions, et la qualité de frappe (SHO) pèse fortement — un 95 en tir
+  // marque bien plus souvent qu'un 70.
   function pickShooter(players, rng) {
     const outfield = players.filter((p) => p.pos !== "GK");
     const pool = outfield.length ? outfield : players;
-    const weights = pool.map((p) => (p.pos === "FWD" ? 5 : p.pos === "MID" ? 3 : p.pos === "DEF" ? 1 : 0.2) * (p.r / 100));
+    const weights = pool.map((p) => {
+      const posW = p.pos === "FWD" ? 6 : p.pos === "MID" ? 2.5 : p.pos === "DEF" ? 0.8 : 0.1;
+      return posW * Math.pow(shoOf(p) / 100, 2.5);
+    });
     let total = weights.reduce((s, w) => s + w, 0), r = rng() * total;
     for (let i = 0; i < pool.length; i++) { r -= weights[i]; if (r <= 0) return pool[i]; }
     return pool[pool.length - 1];

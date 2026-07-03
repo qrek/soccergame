@@ -42,6 +42,19 @@
 
   // ---------- Carte FUT ----------
   const monogram = (n) => n.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+  const hashN = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
+
+  // Zone "photo" : tente de charger public/photos/<id>.jpg ; sinon avatar généré
+  // (dégradé déterministe + initiales) révélé si l'image est absente.
+  function photoHtml(pl) {
+    const h = hashN(pl.n + pl.c);
+    const hue = h % 360, hue2 = (hue + 40) % 360;
+    const bg = `background:radial-gradient(120% 100% at 50% 0%, hsl(${hue} 55% 42%), hsl(${hue2} 45% 22%))`;
+    const img = pl.id != null
+      ? `<img class="ph" src="photos/${pl.id}.jpg" alt="" onerror="this.remove()"/>` : "";
+    return `<div class="fut-photo" style="${bg}">
+      <span class="silhouette">${monogram(pl.n)}</span>${img}</div>`;
+  }
 
   function futCard(pl, opts) {
     opts = opts || {};
@@ -54,7 +67,7 @@
           <div class="fut-rating"><span class="r">${pl.r}</span><span class="p">${pl.pos}</span></div>
           <div class="fut-badges"><span class="flag">${flag(pl.code)}</span></div>
         </div>
-        <div class="fut-photo"><span class="silhouette">${monogram(pl.n)}</span></div>
+        ${photoHtml(pl)}
         <div class="fut-name">${esc(pl.n)}</div>
         <div class="fut-stats">${statsHtml}</div>
       </div></div>`;

@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v17 — mon équipe en surbrillance";
+  const APP_VERSION = "v18 — sons et vibrations";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -24,6 +24,63 @@
 
   const me = () => state.snap && state.snap.players.find((p) => p.pid === state.pid);
   const isHost = () => state.snap && state.snap.hostPid === state.pid;
+
+  // ---------- Sons synthétisés (Web Audio, aucun fichier) + vibration ----------
+  const SND = {
+    muted: false, ctx: null,
+    ensure() {
+      if (this.muted) return null;
+      if (!this.ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; this.ctx = new AC(); }
+      if (this.ctx.state === "suspended") this.ctx.resume();
+      return this.ctx;
+    },
+    env(g, t0, a, d, peak) {
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(peak, t0 + a);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + a + d);
+    },
+    // Coup de sifflet (x n)
+    whistle(n) {
+      const c = this.ensure(); if (!c) return;
+      for (let i = 0; i < (n || 1); i++) {
+        const t0 = c.currentTime + i * 0.5;
+        const o = c.createOscillator(), g = c.createGain(), lfo = c.createOscillator(), lg = c.createGain();
+        o.type = "square"; o.frequency.value = 2450;
+        lfo.frequency.value = 38; lg.gain.value = 160; lfo.connect(lg); lg.connect(o.frequency);
+        this.env(g, t0, 0.02, 0.3, 0.09);
+        o.connect(g); g.connect(c.destination);
+        o.start(t0); o.stop(t0 + 0.4); lfo.start(t0); lfo.stop(t0 + 0.4);
+      }
+    },
+    // Bruit filtré (base de la foule)
+    noise(dur, freq, q, peak) {
+      const c = this.ensure(); if (!c) return;
+      const t0 = c.currentTime;
+      const buf = c.createBuffer(1, Math.floor(c.sampleRate * dur), c.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      const src = c.createBufferSource(); src.buffer = buf;
+      const f = c.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q;
+      const g = c.createGain();
+      this.env(g, t0, dur * 0.3, dur * 0.7, peak);
+      src.connect(f); f.connect(g); g.connect(c.destination);
+      src.start(t0); src.stop(t0 + dur + 0.05);
+    },
+    goal() { this.noise(2.4, 900, 0.7, 0.4); this.noise(2.4, 350, 0.8, 0.28); }, // clameur de foule
+    ooh() { this.noise(0.8, 500, 0.9, 0.13); }, // occasion manquée
+    ding() { // à toi de jouer
+      const c = this.ensure(); if (!c) return;
+      [880, 1318].forEach((fr, i) => {
+        const t0 = c.currentTime + i * 0.12;
+        const o = c.createOscillator(), g = c.createGain();
+        o.type = "sine"; o.frequency.value = fr;
+        this.env(g, t0, 0.01, 0.24, 0.16);
+        o.connect(g); g.connect(c.destination); o.start(t0); o.stop(t0 + 0.3);
+      });
+    },
+  };
+  try { SND.muted = localStorage.getItem("fd_mute") === "1"; } catch (_) {}
+  const vibe = (pat) => { if (!SND.muted && navigator.vibrate) { try { navigator.vibrate(pat); } catch (_) {} } };
 
   // ---------- Maillot (SVG) ----------
   function kitSvg(kit) {
@@ -324,6 +381,16 @@
   }
   document.querySelectorAll(".js-table").forEach((b) => b.addEventListener("click", openLiveTable));
   $("table-modal").addEventListener("click", (e) => { if (e.target.id === "table-modal") $("table-modal").classList.remove("on"); });
+
+  function updateSndIcons() { document.querySelectorAll(".snd-ico").forEach((el) => { el.textContent = SND.muted ? "🔇" : "🔊"; }); }
+  document.querySelectorAll(".js-sound").forEach((b) => b.addEventListener("click", () => {
+    SND.muted = !SND.muted;
+    try { localStorage.setItem("fd_mute", SND.muted ? "1" : "0"); } catch (_) {}
+    updateSndIcons();
+    if (!SND.muted) SND.ding();
+  }));
+  updateSndIcons();
+  document.addEventListener("pointerdown", () => SND.ensure(), { once: true });
 
   document.querySelectorAll(".js-compo").forEach((b) => b.addEventListener("click", openCompo));
   document.querySelectorAll(".js-squads").forEach((b) => b.addEventListener("click", openSquads));
@@ -640,6 +707,20 @@
 
     if (featured) {
       const mc = matchClock(elapsed, goalsOf(featured), p.clockMs, hold);
+      // Ambiance : sifflet d'engagement, clameur sur but (+ vibration),
+      // "ooh" sur occasion, triple sifflet au coup de sifflet final.
+      const snd = state.snd || (state.snd = {});
+      if (snd.round !== state.liveRoundKey) { snd.round = state.liveRoundKey; snd.holdKey = null; snd.ft = false; snd.seen = 0; SND.whistle(1); }
+      if (mc.holding) {
+        const hk = mc.holding.m + "|" + mc.holding.scorer;
+        if (snd.holdKey !== hk) {
+          snd.holdKey = hk;
+          SND.goal();
+          const mySide = featured.a === state.pid ? "a" : featured.b === state.pid ? "b" : null;
+          vibe(mc.holding.side === mySide ? [90, 50, 90, 50, 280] : 160);
+        }
+      }
+      if (mc.ft && !snd.ft) { snd.ft = true; SND.whistle(3); }
       setText($("live-min"), mc.ft ? "TERMINÉ" : mc.minute + "'");
       $("live-min").classList.toggle("ft", mc.ft);
       const sc = scoreAt(featured, mc.minute);
@@ -649,6 +730,11 @@
       if (mc.ft && featured.pens) { pensEl.style.display = ""; setText(pensEl, `Tirs au but : ${featured.pens.pa} - ${featured.pens.pb}`); }
 
       const seen = (featured.events || []).filter((e) => e.m <= mc.minute);
+      if (seen.length > (state.snd.seen || 0)) {
+        const newest = seen[seen.length - 1];
+        if (newest && newest.type !== "goal") SND.ooh();
+        state.snd.seen = seen.length;
+      }
       // Célébration : l'horloge est figée sur le but -> grande animation.
       // (deux buts à la même minute enchaînent deux célébrations distinctes)
       let ovEl = document.getElementById("goal-overlay");
@@ -778,6 +864,10 @@
     $("draft-total").textContent = d.totalPicks;
 
     const isLocal = s.code === "LOCAL";
+    if (myTurn && !isLocal && state.dingKey !== s.code + ":" + d.pickNum) {
+      state.dingKey = s.code + ":" + d.pickNum;
+      SND.ding(); vibe(150);
+    }
     $("turn-banner").classList.toggle("mine", myTurn);
     $("turn-text").innerHTML = isLocal
       ? `📱 Au tour de <b>${esc(d.currentName)}</b> — passe-lui le téléphone !`

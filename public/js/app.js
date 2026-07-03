@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v10 — reset au salon";
+  const APP_VERSION = "v11 — direct amélioré";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -119,13 +119,13 @@
       snap.draft = { pickNum: d.pickNum + 1, totalPicks: d.order.length, currentPid: d.currentPid,
         currentName: cur.name, round: Math.floor(d.pickNum / local.players.length) + 1,
         team: d.currentTeam, needed: localNeeded(cur), deadline: 0,
-        budget: MODEL.BUDGET, budgetLeft: MODEL.BUDGET - cur.spent };
+        budget: MODEL.BUDGET, budgetLeft: MODEL.BUDGET - cur.spent, rerollsLeft: cur.rerolls || 0 };
     }
     if (local.phase === "playing" && local.reveal) {
       const { roundIdx, rounds } = local.reveal;
       const cur = rounds[Math.min(roundIdx, rounds.length - 1)];
       snap.playing = { round: roundIdx + 1, totalRounds: rounds.length, stage: cur.stage, type: cur.type,
-        matches: cur.matches, startedAt: local.roundStartedAt, clockMs: 38000 };
+        matches: cur.matches, startedAt: local.roundStartedAt, clockMs: 52000, goalHoldMs: 3500 };
     }
     if (local.phase === "results") snap.tournament = local.tournament;
     return snap;
@@ -146,7 +146,7 @@
   }
 
   function localStart() {
-    local.players.forEach((p) => { p.squad = []; p.spent = 0; });
+    local.players.forEach((p) => { p.squad = []; p.spent = 0; p.rerolls = 2; });
     const pids = local.players.map((p) => p.pid);
     const order = [];
     for (let r = 0; r < 11; r++) order.push(...(r % 2 === 0 ? pids : pids.slice().reverse()));
@@ -184,6 +184,13 @@
   function localApi(type, extra) {
     if (type === "startGame") { if (local.players.length >= 2) localStart(); }
     else if (type === "pick") localPick(extra.playerId);
+    else if (type === "rerollTeam") {
+      const d = local.draft;
+      if (local.phase === "draft" && d) {
+        const cur = local.players.find((x) => x.pid === d.currentPid);
+        if (cur && cur.rerolls > 0) { cur.rerolls--; localPrepareTurn(); localRender(); }
+      }
+    }
     else if (type === "nextMatch") {
       if (local.phase === "playing" && local.reveal) {
         local.reveal.roundIdx++;
@@ -271,6 +278,18 @@
   $("btn-next-match").addEventListener("click", () => api("nextMatch"));
   $("btn-skip").addEventListener("click", () => api("skipReveal"));
 
+  // Relancer l'équipe tirée au sort (2 max) + voir sa composition.
+  $("btn-reroll").addEventListener("click", () => api("rerollTeam"));
+  function openCompo() {
+    const m = me();
+    if (!m) return;
+    $("compo-sheet").innerHTML = renderPitch(m);
+    $("compo-modal").classList.add("on");
+  }
+  $("btn-compo").addEventListener("click", openCompo);
+  $("btn-compo2").addEventListener("click", openCompo);
+  $("compo-modal").addEventListener("click", (e) => { if (e.target.id === "compo-modal") $("compo-modal").classList.remove("on"); });
+
   // Réinitialisation d'urgence (confirmée) — accessible à tous les joueurs.
   const confirmReset = () => { if (confirm("Réinitialiser la partie pour tout le monde et revenir au salon ?")) api("resetGame"); };
   ["btn-reset-lobby", "btn-reset-draft", "btn-reset-playing", "btn-reset-results"].forEach((id) => $(id).addEventListener("click", confirmReset));
@@ -308,22 +327,65 @@
   const fmtM = (v) => (v >= 10 ? String(Math.round(v)) : String(v).replace(".", ",")) + " M€";
   let liveInterval = null;
 
+  // Ne réécrit le DOM que si le contenu a changé (évite tout clignotement).
+  function setHtml(el, html) { if (el && el.__html !== html) { el.__html = html; el.innerHTML = html; } }
+  function setText(el, txt) { if (el && el.__txt !== txt) { el.__txt = txt; el.textContent = txt; } }
+
+  // Horloge d'un match : linéaire 0'->90', figée `hold` ms sur chaque but.
+  function matchClock(elapsed, goals, clockMs, hold) {
+    let holds = 0;
+    for (const g of goals) {
+      const tg = (g.m / 90) * clockMs + holds;
+      if (elapsed < tg) break;
+      if (elapsed < tg + hold) return { minute: g.m, holding: g, ft: false };
+      holds += hold;
+    }
+    const minute = Math.max(0, Math.min(90, Math.floor(((elapsed - holds) / clockMs) * 90)));
+    return { minute, holding: null, ft: elapsed - holds >= clockMs };
+  }
+  const goalsOf = (m) => (m.events || []).filter((e) => e.type === "goal").sort((a, b) => a.m - b.m);
+
   function renderPlaying(s) {
     clearInterval(timerInterval);
     const p = s.playing; if (!p) return;
     const isLocal = s.code === "LOCAL";
     $("play-stage").textContent = `${p.stage} · ${p.round}/${p.totalRounds}`;
-    // Chacun suit SON match ; sans match (multiplex) on voit toute la journée.
+    // Chacun suit SON match ; en mode 1 téléphone, le premier match en vedette.
     const mine = isLocal ? null : p.matches.find((m) => m.a === state.pid || m.b === state.pid);
+    const featured = mine || (isLocal ? p.matches[0] : null);
+
+    // Squelette construit une seule fois par journée : ensuite on ne met à
+    // jour que les chiffres/fils, pas de reconstruction -> pas de clignotement.
+    const roundKey = s.code + "|" + p.stage + "|" + p.round;
+    if (state.liveRoundKey !== roundKey) {
+      state.liveRoundKey = roundKey;
+      state.replayKey = null;
+      buildLiveSkeleton(p, featured, mine, isLocal);
+    }
 
     clearInterval(liveInterval);
-    const tick = () => {
-      const elapsed = Date.now() - p.startedAt;
-      const minute = Math.max(0, Math.min(90, Math.floor((elapsed / p.clockMs) * 90)));
-      drawLive(p, mine, minute, isLocal);
-    };
+    const tick = () => drawLive(p, featured, isLocal);
     tick();
-    liveInterval = setInterval(tick, 400);
+    liveInterval = setInterval(tick, 300);
+  }
+
+  function buildLiveSkeleton(p, featured, mine, isLocal) {
+    if (featured) {
+      $("live-card").innerHTML = `
+        <div class="lc-stage">${esc(p.stage)} · ${mine ? "TON MATCH" : "MATCH VEDETTE"} <span class="live-min" id="live-min">0'</span></div>
+        <div class="lc-row">
+          <span class="lc-team">${esc(featured.an)}</span>
+          <span class="lc-score"><span id="live-ga">0</span> - <span id="live-gb">0</span></span>
+          <span class="lc-team">${esc(featured.bn)}</span>
+        </div>
+        <div class="lc-pens" id="live-pens" style="display:none"></div>`;
+    } else {
+      $("live-card").innerHTML = `<div class="lc-stage">${esc(p.stage)} · MULTIPLEX <span class="live-min" id="live-min">0'</span></div>`;
+      $("live-stage").innerHTML = "";
+    }
+    $("live-summary").innerHTML = '<div class="live-feed" id="live-feed"></div><p class="hint" id="live-hint"></p>';
+    $("live-prev").innerHTML = "";
+    ["live-card", "live-summary", "live-prev"].forEach((id) => { const el = $(id); if (el) el.__html = undefined; });
   }
 
   // ---------- Replay d'action : 11 contre 11 sur terrain complet ----------
@@ -400,19 +462,37 @@
 
     const move = (from, to, begin, dur) =>
       `<animateMotion begin="${begin}s" dur="${dur}s" fill="freeze" path="M 0 0 L ${(to.x - from.x).toFixed(1)} ${(to.y - from.y).toFixed(1)}"/>`;
+    // Balancement permanent : personne ne reste figé (réaliste, subtil).
+    let swayN = 0;
+    const sway = () => {
+      swayN++;
+      const a = (R(swayN * 7) - 0.5) * 2.4, b = (R(swayN * 13) - 0.5) * 2;
+      return `<animateTransform attributeName="transform" type="translate" additive="sum"
+        values="0 0;${a.toFixed(1)} ${b.toFixed(1)};${(-a * 0.7).toFixed(1)} ${(-b * 0.7).toFixed(1)};0 0"
+        dur="${(3.4 + R(swayN * 3) * 2.2).toFixed(1)}s" repeatCount="indefinite"/>`;
+    };
     const dot = (d, color, extra, ring) =>
-      `<circle cx="${d.p.x.toFixed(1)}" cy="${d.p.y.toFixed(1)}" r="1.7" fill="${color}" stroke="${ring ? "#ffd54a" : "rgba(255,255,255,.55)"}" stroke-width="${ring ? 0.6 : 0.35}">${extra || ""}</circle>`;
+      `<circle cx="${d.p.x.toFixed(1)}" cy="${d.p.y.toFixed(1)}" r="1.7" fill="${color}" stroke="${ring ? "#ffd54a" : "rgba(255,255,255,.55)"}" stroke-width="${ring ? 0.6 : 0.35}">${extra || ""}${sway()}</circle>`;
+
+    // Célébration de but : le buteur grossit, deux coéquipiers le rejoignent.
+    const isGoal = ev.type === "goal";
+    const mates = isGoal ? near(A.dots, shot, shooter).slice(1, 3) : [];
+    const cheer = `<animate attributeName="r" values="1.7;1.7;2.7;2" keyTimes="0;0.72;0.85;1" dur="2.6s" fill="freeze"/>`;
+    const push = right ? 4.5 : -4.5; // le bloc offensif accompagne l'action
 
     const players = []
       .concat(A.dots.map((d) => {
-        if (d === shooter) return dot(d, A.kit, move(d.p, shot, 0.15, 1.1));
+        if (d === shooter) return dot(d, A.kit, move(d.p, shot, 0.15, 1.1) + (isGoal ? cheer : ""));
+        if (mates.includes(d)) return dot(d, A.kit, move(d.p, { x: shot.x + (R(swayN) - 0.5) * 6, y: shot.y + (R(swayN + 1) - 0.5) * 6 }, 1.85, 0.6));
         if (d === passer) return dot(d, A.kit, move(d.p, { x: d.p.x + (shot.x - d.p.x) * 0.2, y: d.p.y + (shot.y - d.p.y) * 0.2 }, 0.9, 1));
-        return dot(d, A.kit, d.pos === "GK" ? "" : "", d.pos === "GK");
+        if (d.pos === "GK") return dot(d, A.kit, "", true);
+        return dot(d, A.kit, move(d.p, { x: d.p.x + push, y: d.p.y + (32 - d.p.y) * 0.06 }, 0.3, 1.6));
       }))
       .concat(D.dots.map((d) => {
         if (d === gk) return dot(d, D.kit, move(d.p, gkTo, 1.5, 0.35), true);
         if (defsNear.includes(d)) return dot(d, D.kit, move(d.p, { x: d.p.x + (shot.x - d.p.x) * 0.35, y: d.p.y + (shot.y - d.p.y) * 0.35 }, 0.55, 1.1));
-        return dot(d, D.kit);
+        // le bloc défensif recule et coulisse vers le côté du ballon
+        return dot(d, D.kit, move(d.p, { x: d.p.x - push * 0.5, y: d.p.y + (shot.y - d.p.y) * 0.12 }, 0.35, 1.5));
       }))
       .join("");
 
@@ -430,8 +510,13 @@
   function kickoffStage(match) {
     const A = teamSetup(match.a, "a"), D = teamSetup(match.b, "b");
     if (A.kit.toLowerCase() === D.kit.toLowerCase()) D.kit = "#f1f3f5";
-    const dot = (d, color, ring) =>
-      `<circle cx="${d.p.x.toFixed(1)}" cy="${d.p.y.toFixed(1)}" r="1.7" fill="${color}" stroke="${ring ? "#ffd54a" : "rgba(255,255,255,.55)"}" stroke-width="${ring ? 0.6 : 0.35}"/>`;
+    let n = 0;
+    const dot = (d, color, ring) => {
+      n++;
+      const a = ((n * 37 % 10) / 10 - 0.5) * 2.2, b = ((n * 53 % 10) / 10 - 0.5) * 1.8;
+      return `<circle cx="${d.p.x.toFixed(1)}" cy="${d.p.y.toFixed(1)}" r="1.7" fill="${color}" stroke="${ring ? "#ffd54a" : "rgba(255,255,255,.55)"}" stroke-width="${ring ? 0.6 : 0.35}">
+        <animateTransform attributeName="transform" type="translate" additive="sum" values="0 0;${a.toFixed(1)} ${b.toFixed(1)};0 0" dur="${(3.2 + (n % 5) * 0.5).toFixed(1)}s" repeatCount="indefinite"/></circle>`;
+    };
     const players = A.dots.map((d) => dot(d, A.kit, d.pos === "GK")).join("")
       + D.dots.map((d) => dot(d, D.kit, d.pos === "GK")).join("");
     return `<div class="fm-pitch replay"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
@@ -448,25 +533,24 @@
     return { ga, gb };
   }
 
-  function drawLive(p, mine, minute, isLocal) {
-    const ft = minute >= 90;
-    const badge = ft ? '<span class="live-min ft">TERMINÉ</span>' : `<span class="live-min">⏱ ${minute}'</span>`;
-    // En mode 1 téléphone, on suit le premier match de la journée en vedette.
-    const featured = mine || (isLocal ? p.matches[0] : null);
+  function drawLive(p, featured, isLocal) {
+    const elapsed = Date.now() - p.startedAt;
+    const hold = p.goalHoldMs || 3500;
+    const maxGoals = Math.max(0, ...p.matches.map((m) => goalsOf(m).length));
+    const ftAll = elapsed >= p.clockMs + maxGoals * hold; // toute la journée est finie
 
     if (featured) {
-      const sc = scoreAt(featured, minute);
-      $("live-card").innerHTML = `
-        <div class="lc-stage">${esc(p.stage)} · ${mine ? "TON MATCH" : "MATCH VEDETTE"} ${badge}</div>
-        <div class="lc-row">
-          <span class="lc-team">${esc(featured.an)}</span>
-          <span class="lc-score">${sc.ga} - ${sc.gb}</span>
-          <span class="lc-team">${esc(featured.bn)}</span>
-        </div>
-        ${ft && featured.pens ? `<div class="lc-pens">Tirs au but : ${featured.pens.pa} - ${featured.pens.pb}</div>` : ""}`;
+      const mc = matchClock(elapsed, goalsOf(featured), p.clockMs, hold);
+      setText($("live-min"), mc.ft ? "TERMINÉ" : mc.minute + "'");
+      $("live-min").classList.toggle("ft", mc.ft);
+      const sc = scoreAt(featured, mc.minute);
+      setText($("live-ga"), String(sc.ga));
+      setText($("live-gb"), String(sc.gb));
+      const pensEl = $("live-pens");
+      if (mc.ft && featured.pens) { pensEl.style.display = ""; setText(pensEl, `Tirs au but : ${featured.pens.pa} - ${featured.pens.pb}`); }
 
       // Replay de la dernière action : rendu uniquement quand l'action change.
-      const seen = (featured.events || []).filter((e) => e.m <= minute);
+      const seen = (featured.events || []).filter((e) => e.m <= mc.minute);
       const last = seen[seen.length - 1];
       const key = p.stage + ":" + featured.a + ":" + (last ? last.m + last.scorer + last.type : "ko");
       if (state.replayKey !== key) {
@@ -474,37 +558,50 @@
         $("live-stage").innerHTML = last ? actionReplay(featured, last) : kickoffStage(featured);
       }
 
+      // Célébration : l'horloge est figée sur le but -> grande animation.
+      // (deux buts à la même minute enchaînent deux célébrations distinctes)
+      let ovEl = document.getElementById("goal-overlay");
+      if (mc.holding) {
+        const okey = mc.holding.m + "|" + mc.holding.scorer;
+        if (ovEl && ovEl.dataset.k !== okey) { ovEl.remove(); ovEl = null; }
+        if (!ovEl) {
+          const pitch = $("live-stage").querySelector(".fm-pitch");
+          if (pitch) pitch.insertAdjacentHTML("beforeend",
+            `<div id="goal-overlay" class="goal-overlay" data-k="${esc(okey)}"><span>⚽ BUUUT !</span><b>${esc(mc.holding.scorer)}</b><i>${esc(mc.holding.teamName)}</i></div>`);
+        }
+      } else if (ovEl) { ovEl.remove(); }
+
       const evs = seen.slice().sort((a, b) => b.m - a.m);
-      $("live-summary").innerHTML = `<div class="live-feed">${
+      setHtml($("live-feed"),
         evs.map((e) => `<div class="evline ${e.type === "goal" ? "goal" : ""}"><span class="min">${e.m}'</span><span class="etxt">${esc(e.text)}</span></div>`).join("")
-        || `<div class="evline"><span class="min">1'</span><span class="etxt">🟢 Coup d'envoi !</span></div>`}</div>`;
+        || `<div class="evline"><span class="min">1'</span><span class="etxt">🟢 Coup d'envoi !</span></div>`);
     } else {
-      $("live-card").innerHTML = `<div class="lc-stage">${esc(p.stage)} · MULTIPLEX ${badge}</div>`;
-      $("live-stage").innerHTML = "";
-      state.replayKey = null;
-      $("live-summary").innerHTML = "";
+      const raw = Math.max(0, Math.min(90, Math.floor((elapsed / p.clockMs) * 90)));
+      setText($("live-min"), ftAll ? "TERMINÉ" : raw + "'");
+      $("live-min").classList.toggle("ft", ftAll);
     }
 
     const others = p.matches.filter((m) => m !== featured);
-    $("live-prev-title").textContent = mine ? "Multiplex — les autres matchs" : "Tous les matchs";
+    setText($("live-prev-title"), featured ? "Multiplex — les autres matchs" : "Tous les matchs");
     $("live-prev-title").style.display = others.length ? "" : "none";
-    $("live-prev").innerHTML = others.map((m) => {
-      const sc = scoreAt(m, minute);
-      const lastGoal = (m.events || []).filter((e) => e.type === "goal" && e.m <= minute).pop();
+    setHtml($("live-prev"), others.map((m) => {
+      const omc = matchClock(elapsed, goalsOf(m), p.clockMs, hold);
+      const sc = scoreAt(m, omc.minute);
+      const lastGoal = goalsOf(m).filter((e) => e.m <= omc.minute).pop();
       return `<div class="match">
         <span class="side"><span>${esc(m.an)}</span></span>
-        <span class="score">${sc.ga}-${sc.gb}${ft && m.pens ? `<span class="pens"> (${m.pens.pa}-${m.pens.pb})</span>` : ""}</span>
+        <span class="score">${sc.ga}-${sc.gb}${omc.ft && m.pens ? `<span class="pens"> (${m.pens.pa}-${m.pens.pb})</span>` : ""}</span>
         <span class="side" style="justify-content:flex-end"><span>${esc(m.bn)}</span></span>
-      </div>${lastGoal && !ft ? `<div class="mplex-last">⚽ ${lastGoal.m}' ${esc(lastGoal.scorer)}</div>` : ""}`;
-    }).join("");
+      </div>${lastGoal && !omc.ft ? `<div class="mplex-last">⚽ ${lastGoal.m}' ${esc(lastGoal.scorer)}</div>` : ""}`;
+    }).join(""));
 
-    // Journée suivante : en local un bouton au coup de sifflet final,
-    // en ligne le serveur avance seul quand tous les matchs sont finis.
+    // Journée suivante : en local un bouton quand TOUS les matchs sont finis,
+    // en ligne le serveur avance seul.
     const nextBtn = $("btn-next-match");
-    nextBtn.style.display = isLocal && ft ? "" : "none";
+    nextBtn.style.display = isLocal && ftAll ? "" : "none";
     nextBtn.textContent = p.round >= p.totalRounds ? "Voir les résultats 🏆" : "Journée suivante ▶";
     $("btn-skip").style.display = !isLocal && isHost() ? "" : "none";
-    if (!isLocal && ft) $("live-summary").insertAdjacentHTML("beforeend", '<p class="hint">Tous les matchs sont terminés — journée suivante dans un instant…</p>');
+    setText($("live-hint"), !isLocal && ftAll ? "Tous les matchs sont terminés — journée suivante dans un instant…" : "");
   }
 
   // ---------- Lobby ----------
@@ -604,6 +701,11 @@
     $("need-bar").innerHTML = budgetChip + chemChip
       + (Object.entries(d.needed).map(([pos, n]) => `<span class="need-chip">${pos} <b>×${n}</b></span>`).join("")
       || '<span class="need-chip">Effectif complet</span>');
+
+    // Relance d'équipe : visible seulement à son tour, avec le compteur.
+    const rerollBtn = $("btn-reroll");
+    rerollBtn.style.display = myTurn && d.rerollsLeft > 0 ? "" : "none";
+    rerollBtn.textContent = `🎲 Relancer l'équipe (${d.rerollsLeft})`;
 
     const myCountries = new Set((m0 ? m0.squad : []).map((p) => p.c));
     const grid = $("cards-grid");
@@ -857,7 +959,7 @@
       fetch("_mock/" + mock + ".json").then((r) => r.json()).then((d) => {
         state.code = d.snap.code; state.pid = d.viewPid; state.snap = d.snap;
         // En démo, rejoue le direct depuis le coup d'envoi.
-        if (d.snap.playing) { d.snap.playing.startedAt = Date.now(); d.snap.playing.clockMs = parseInt(params.get("clock"), 10) || 38000; }
+        if (d.snap.playing) { d.snap.playing.startedAt = Date.now(); d.snap.playing.clockMs = parseInt(params.get("clock"), 10) || 52000; d.snap.playing.goalHoldMs = parseInt(params.get("hold"), 10) || d.snap.playing.goalHoldMs || 3500; }
         render();
         if (params.get("open") && state.matchMap && state.matchMap.size) matchModal(state.matchMap.values().next().value);
         const tb = params.get("tab");

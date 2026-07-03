@@ -19,8 +19,10 @@ const PLAYERS = RAW_PLAYERS.map((p, i) => ({ id: i, ...p }));
 const PORT = process.env.PORT || 3000;
 const TURN_SECONDS = 45;
 const SQUAD_SIZE = 11; // toutes les équipes ont 11 joueurs
-const MATCH_MS = parseInt(process.env.MATCH_MS, 10) || 38000; // durée du direct d'une journée (0' -> 90')
-const PAUSE_MS = parseInt(process.env.PAUSE_MS, 10) || 6000;  // pause score final avant la journée suivante
+const MATCH_MS = parseInt(process.env.MATCH_MS, 10) || 52000;      // durée du direct d'une journée (0' -> 90')
+const PAUSE_MS = parseInt(process.env.PAUSE_MS, 10) || 7000;       // pause score final avant la journée suivante
+const GOAL_HOLD_MS = parseInt(process.env.GOAL_HOLD_MS, 10) || 3500; // l'horloge se fige sur chaque but (célébration)
+const REROLLS = 2; // relances d'équipe par joueur pendant le draft
 const PUBLIC_DIR = path.join(__dirname, "public");
 
 // ---------------------------------------------------------------------------
@@ -122,6 +124,7 @@ function snapshot(room) {
       deadline: d.deadline,
       budget: MODEL.BUDGET,
       budgetLeft: drafter ? MODEL.BUDGET - drafter.spent : 0,
+      rerollsLeft: drafter ? (drafter.rerolls || 0) : 0,
     };
   }
 
@@ -136,6 +139,7 @@ function snapshot(room) {
       matches: cur.matches,
       startedAt,
       clockMs: MATCH_MS,
+      goalHoldMs: GOAL_HOLD_MS,
     };
   }
 
@@ -164,7 +168,7 @@ function broadcastPick(room, payload) {
 // ---------------------------------------------------------------------------
 function startDraft(room) {
   room.phase = "draft";
-  room.players.forEach((p) => { p.squad = []; p.spent = 0; });
+  room.players.forEach((p) => { p.squad = []; p.spent = 0; p.rerolls = REROLLS; });
   const pids = room.players.map((p) => p.pid);
   const order = [];
   for (let r = 0; r < SQUAD_SIZE; r++) {
@@ -246,11 +250,13 @@ function finishDraft(room) {
 function startRound(room) {
   room.reveal.startedAt = Date.now();
   clearTimeout(room.revealTimer);
+  const cur = room.reveal.rounds[room.reveal.roundIdx];
+  const maxGoals = Math.max(0, ...cur.matches.map((m) => (m.events || []).filter((e) => e.type === "goal").length));
   room.revealTimer = setTimeout(() => {
     room.reveal.roundIdx++;
     if (room.reveal.roundIdx >= room.reveal.rounds.length) finishReveal(room);
     else startRound(room);
-  }, MATCH_MS + PAUSE_MS);
+  }, MATCH_MS + maxGoals * GOAL_HOLD_MS + PAUSE_MS);
   broadcast(room);
 }
 
@@ -365,6 +371,17 @@ const ACTIONS = {
     const room = rooms.get(msg.code);
     if (!room || !playerByPid(room, msg.pid)) return { ok: false };
     resetRoom(room);
+    return { ok: true };
+  },
+  // Relancer l'équipe tirée au sort (2 fois max par joueur et par draft).
+  rerollTeam(msg) {
+    const room = rooms.get(msg.code);
+    if (!room || room.phase !== "draft" || !room.draft) return { ok: false };
+    if (msg.pid !== room.draft.currentPid) return { ok: false };
+    const drafter = playerByPid(room, msg.pid);
+    if (!drafter || !(drafter.rerolls > 0)) return { ok: false, error: "Plus de relance disponible." };
+    drafter.rerolls--;
+    prepareTurn(room);
     return { ok: true };
   },
   // Quitter la session depuis le salon (l'hôte est transféré si besoin).

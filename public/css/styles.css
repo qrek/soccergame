@@ -322,3 +322,13 @@ body {
 
 /* Bouton de réinitialisation (discret, rouge) */
 .btn-danger { border-color: rgba(255, 84, 112, .4); color: #ff8ba0; font-size: 14px; padding: 12px 18px; }
+
+/* Célébration de but : overlay pendant que l'horloge est figée */
+.goal-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: radial-gradient(80% 70% at 50% 50%, rgba(4, 15, 9, .55), rgba(4, 15, 9, .82)); z-index: 3; animation: fade .25s; }
+.goal-overlay span { font-size: 34px; font-weight: 900; letter-spacing: 2px; color: var(--accent);
+  text-shadow: 0 0 24px rgba(0, 255, 135, .6); animation: goalpop .7s cubic-bezier(.2, 1.6, .4, 1); }
+.goal-overlay b { font-size: 18px; font-weight: 900; margin-top: 6px; }
+.goal-overlay i { font-style: normal; font-size: 12px; color: var(--muted); margin-top: 2px; }
+@keyframes goalpop { 0% { transform: scale(.2) rotate(-6deg); opacity: 0; } 60% { transform: scale(1.15) rotate(2deg); } 100% { transform: scale(1) rotate(0); opacity: 1; } }
+.draft-tools .btn { font-size: 14px; padding: 12px 10px; }

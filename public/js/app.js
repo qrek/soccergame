@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v24 — buts nets + ambiance";
+  const APP_VERSION = "v25 — inertie + équilibrage";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -658,8 +658,11 @@
       poss = defSide;
       if (ev.type === "goal") {
         carrier = centerMost(outfield(poss));
-        segs.push({ type: "hold", t0: t, t1: t + 1.1, c: carrier.idx, to: { x: 50, y: 32 } });
-        sb = { x: 50, y: 32 }; t += 1.1;
+        // le ballon revient de la cage vers le rond central (pas de saut)
+        segs.push({ type: "pass", t0: t, t1: t + 0.5, c: carrier.idx, from: sb, to: { x: 50, y: 32 } });
+        sb = { x: 50, y: 32 }; t += 0.5;
+        segs.push({ type: "hold", t0: t, t1: t + 0.6, c: carrier.idx, to: { x: 50, y: 32 } });
+        t += 0.6;
       } else {
         carrier = ev.type === "post" ? nearestTo(outfield(poss), sb) : gkOf(poss);
         const cs = { x: carrier.home.x, y: carrier.home.y };
@@ -766,9 +769,15 @@
     const holder = seg && seg.c >= 0 ? sim.dots[seg.c] : null;
     // ballon : au pied du porteur, ou en vol vers le receveur / la cible du tir
     let bx, by;
-    if (seg.type === "hold" && holder) { bx = holder.x + (holder.side === "a" ? 1 : -1); by = holder.y; }
+    if (seg.type === "hold" && holder) {
+      const vn = Math.hypot(holder.vx || 0, holder.vy || 0);
+      if (vn > 0.02) { bx = holder.x + (holder.vx / vn) * 1.2; by = holder.y + (holder.vy / vn) * 1.2; }
+      else { bx = holder.x + (holder.side === "a" ? 1 : -1); by = holder.y; }
+    }
     else {
-      const u = clampV((mf - seg.t0) / (seg.t1 - seg.t0 || 0.01), 0, 1);
+      const u0 = clampV((mf - seg.t0) / (seg.t1 - seg.t0 || 0.01), 0, 1);
+      // inertie : le ballon part vite (frappé) puis freine (frottement)
+      const u = seg.type === "shot" ? 1 - Math.pow(1 - u0, 1.45) : 1 - Math.pow(1 - u0, 1.85);
       const tx = seg.type === "pass" && holder ? holder.x : seg.to.x;
       const ty = seg.type === "pass" && holder ? holder.y : seg.to.y;
       bx = seg.from.x + (tx - seg.from.x) * u;
@@ -784,6 +793,10 @@
       const q = Math.hypot(d.x - bx, d.y - by);
       if (q < best) { best = q; presser = d; }
     }
+    // hystérésis : on garde le même presseur tant qu'il reste raisonnablement proche
+    const prev = sim.dots[sim.presserIdx];
+    if (prev && prev.side === defSide && prev.pos !== "GK" && Math.hypot(prev.x - bx, prev.y - by) < best * 1.45) presser = prev;
+    sim.presserIdx = presser ? presser.idx : -1;
     // soutiens : les 2 coéquipiers les plus proches proposent une solution
     let sup1 = null, sup2 = null;
     if (holder && seg.type === "hold") {
@@ -823,14 +836,34 @@
       ty += Math.cos((now / 1000) * d.w2 + d.ph2) * 0.8;
       const dx = tx - d.x, dy = ty - d.y, dist = Math.hypot(dx, dy) || 0.0001;
       const step = Math.min(dist, sp * dt);
-      d.x = clampV(d.x + (dx / dist) * step, 2.5, 97.5);
-      d.y = clampV(d.y + (dy / dist) * step, 3, 61);
+      d.vx = (dx / dist) * step; d.vy = (dy / dist) * step;
+      d.x = clampV(d.x + d.vx, 2.5, 97.5);
+      d.y = clampV(d.y + d.vy, 3, 61);
       if (d.el.getAttribute("r") !== "2") d.el.setAttribute("r", "2");
       d.el.setAttribute("cx", d.x.toFixed(2));
       d.el.setAttribute("cy", d.y.toFixed(2));
     }
     sim.ballEl.setAttribute("cx", clampV(bx, 0.5, 99.5).toFixed(2));
     sim.ballEl.setAttribute("cy", clampV(by, 2, 62).toFixed(2));
+  }
+
+  // Homme du match : meilleur buteur, sinon gardien décisif, sinon plus remuant.
+  function motmOf(events) {
+    const evs = events || [];
+    const goals = {}, saves = {}, tries = {};
+    evs.forEach((e) => {
+      if (e.type === "goal") goals[e.scorer] = (goals[e.scorer] || 0) + 1;
+      if (e.type === "saved") saves[e.gkName] = (saves[e.gkName] || 0) + 1;
+      tries[e.scorer] = (tries[e.scorer] || 0) + 1;
+    });
+    const top = (o) => Object.entries(o).sort((a, b) => b[1] - a[1])[0];
+    const g = top(goals);
+    if (g) return { name: g[0], why: g[1] > 1 ? g[1] + " buts" : "buteur décisif" };
+    const sv = top(saves);
+    if (sv && sv[1] >= 2) return { name: sv[0], why: sv[1] + " arrêts" };
+    const tr = top(tries);
+    if (tr) return { name: tr[0], why: "le plus dangereux" };
+    return null;
   }
 
   // Score d'un match à la minute donnée.
@@ -892,8 +925,12 @@
 
       const amb = (state.sim && state.sim.ambient ? state.sim.ambient : []).filter((c) => c.m <= mc.minute);
       const lines = seen.map((e) => ({ m: e.m, cls: e.type === "goal" ? "goal" : "", text: e.text }))
-        .concat(amb.map((c) => ({ m: c.m, cls: "amb", text: c.text })))
-        .sort((a, b) => b.m - a.m);
+        .concat(amb.map((c) => ({ m: c.m, cls: "amb", text: c.text })));
+      if (mc.ft) {
+        const motm = motmOf(featured.events);
+        if (motm) lines.push({ m: 90, cls: "goal", text: `⭐ Homme du match : ${motm.name} (${motm.why})` });
+      }
+      lines.sort((a, b) => b.m - a.m);
       setHtml($("live-feed"),
         lines.map((l) => `<div class="evline ${l.cls}"><span class="min">${l.m}'</span><span class="etxt">${esc(l.text)}</span></div>`).join("")
         || `<div class="evline"><span class="min">1'</span><span class="etxt">🟢 Coup d'envoi !</span></div>`);
@@ -1155,7 +1192,9 @@
 
     const champ = t.champion;
     const champTeam = champ && s.players.find((p) => p.pid === champ.id);
-    $("champion-card").innerHTML = champ ? `
+    const confetti = '<div class="confetti">' + Array.from({ length: 26 }, (_, i) =>
+      `<i style="left:${(i * 37) % 100}%;background:${["#00ff87", "#f8e79a", "#ff5470", "#7ec8ff", "#fff"][i % 5]};animation-delay:${(i % 9) * 0.35}s;animation-duration:${2.4 + (i % 5) * 0.5}s"></i>`).join("") + "</div>";
+    $("champion-card").innerHTML = champ ? confetti + `
       <div class="trophy">🏆</div><div class="c-label">Champion</div>
       <div class="c-name">${esc(champ.name)}${champ.id === state.pid ? " 🎉" : ""}</div>
       <div class="c-ovr">Note ${champTeam ? champTeam.strength.overall : "—"} · Alchimie ${champTeam ? champTeam.chem : "—"}</div>` : "";
@@ -1271,6 +1310,7 @@
         <span class="ms-team b">${esc(mm.bn)}</span>
       </div>
       ${mm.pens ? `<div class="ms-pens">Tirs au but : ${mm.pens.pa} - ${mm.pens.pb}</div>` : ""}
+      ${(() => { const mo = motmOf(evs); return mo ? `<div class="ms-motm">⭐ Homme du match : ${esc(mo.name)} (${esc(mo.why)})</div>` : ""; })()}
       <div class="fm-legend">${legend}</div>
       ${fmPitchHtml(evs, 999)}
       <div class="fm-events">${lines}</div>

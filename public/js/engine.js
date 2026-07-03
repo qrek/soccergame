@@ -107,10 +107,11 @@
     const ba = teamA.bonus || 0, bb = teamB.bonus || 0;
     sa.atk += ba; sa.def += ba;
     sb.atk += bb; sb.def += bb;
-    const lamA = Math.max(0.2, 1.4 * Math.pow(2, (sa.atk - sb.def) / 12));
-    const lamB = Math.max(0.2, 1.4 * Math.pow(2, (sb.atk - sa.def) / 12));
-    const ga = poisson(lamA, rng);
-    const gb = poisson(lamB, rng);
+    // /8 (au lieu de /12) : la qualité du draft pèse vraiment sur le résultat.
+    const lamA = Math.max(0.18, 1.32 * Math.pow(2, (sa.atk - sb.def) / 8));
+    const lamB = Math.max(0.18, 1.32 * Math.pow(2, (sb.atk - sa.def) / 8));
+    const ga = Math.min(6, poisson(lamA, rng));
+    const gb = Math.min(6, poisson(lamB, rng));
     const events = finalizeEvents(
       teamChances(teamA, teamB, ga, "a", sb, rng),
       teamChances(teamB, teamA, gb, "b", sa, rng),

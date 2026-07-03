@@ -17,7 +17,7 @@ const RAW_PLAYERS = require("./public/data/players.js");
 const PLAYERS = RAW_PLAYERS.map((p, i) => ({ id: i, ...p }));
 
 const PORT = process.env.PORT || 3000;
-const TURN_SECONDS = 10;
+const TURN_SECONDS = 13;
 const SQUAD_SIZE = 11; // toutes les équipes ont 11 joueurs
 const MATCH_MS = parseInt(process.env.MATCH_MS, 10) || 44000;      // durée du direct d'une journée (0' -> 90')
 const PAUSE_MS = parseInt(process.env.PAUSE_MS, 10) || 7000;       // pause score final avant la journée suivante

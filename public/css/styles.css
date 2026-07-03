@@ -401,3 +401,14 @@ body {
 
 /* Commentaires d'ambiance dans le fil du direct */
 .evline.amb .etxt { color: var(--muted); font-style: italic; }
+
+/* Confettis du champion + homme du match */
+.champion-card { position: relative; overflow: hidden; }
+.confetti { position: absolute; inset: 0; pointer-events: none; }
+.confetti i { position: absolute; top: -8%; width: 7px; height: 11px; border-radius: 2px; opacity: .85;
+  animation: confetti-fall linear infinite; }
+@keyframes confetti-fall {
+  0% { transform: translateY(-10%) rotate(0deg); }
+  100% { transform: translateY(1300%) rotate(660deg); }
+}
+.ms-motm { text-align: center; color: var(--gold-a); font-weight: 800; font-size: 13.5px; margin: 6px 0 2px; }

@@ -44,13 +44,29 @@ Variable d'environnement optionnelle : `PORT` (par défaut `3000`).
 ⚠️ **Vercel, Netlify, GitHub Pages… ne servent que les fichiers statiques** : le
 serveur (`server.js`, sessions, temps réel) n'y tourne pas, donc la création de
 session par code/QR y répond 404. Sur ces plateformes, seul le mode
-**« 1 téléphone »** est disponible (bouton dédié sur l'accueil). Pour le
-multijoueur par QR, hébergez `node server.js` sur un service qui exécute Node
-(Render et Railway ont un palier gratuit : « New Web Service » → repo →
-commande `node server.js`).
+**« 1 téléphone »** est disponible (bouton dédié sur l'accueil).
 
-Note Vercel : si vous déployez le dossier tel quel, définissez le répertoire de
-sortie sur `public/`.
+## Héberger le serveur en ligne (multijoueur par téléphone)
+
+### Render — gratuit, 3 clics (recommandé)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/qrek/soccergame)
+
+1. Clique le bouton ci-dessus (ou sur render.com : **New → Blueprint** → ce repo) ;
+2. Connecte ton compte GitHub et valide — le fichier `render.yaml` configure tout ;
+3. À la fin du déploiement, tu obtiens une URL type
+   `https://football-draft.onrender.com` : **c'est l'adresse du jeu**.
+   Chaque joueur l'ouvre sur son téléphone, l'hôte crée la session et les
+   autres scannent le QR / saisissent le code.
+
+> Palier gratuit : le serveur s'endort après ~15 min d'inactivité ; la première
+> visite le réveille (compter ~1 min), ensuite c'est instantané.
+
+### Autres hébergeurs
+
+Un `Dockerfile` est fourni : toute plateforme qui exécute Node ou Docker
+convient (Railway, Fly.io, VPS…). Commande de démarrage : `node server.js`
+(le serveur écoute sur `$PORT`, 3000 par défaut).
 
 ## Architecture
 

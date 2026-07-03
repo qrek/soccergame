@@ -1,0 +1,11 @@
+# Blueprint Render — déploie le serveur de jeu multijoueur en un clic.
+# https://render.com/deploy?repo=https://github.com/qrek/soccergame
+services:
+  - type: web
+    name: football-draft
+    runtime: node
+    plan: free
+    buildCommand: "echo 'aucune dépendance à installer'"
+    startCommand: node server.js
+    healthCheckPath: /
+    autoDeploy: true

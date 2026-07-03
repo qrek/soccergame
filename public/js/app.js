@@ -2,6 +2,9 @@
 (function () {
   "use strict";
 
+  // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
+  const APP_VERSION = "v8 — replay 11v11";
+
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
   let timerInterval = null, uid = 0, teamNameTimer = null;
@@ -827,6 +830,9 @@
 
   // ---------- Démarrage ----------
   function boot() {
+    const foot = document.querySelector(".home-foot");
+    if (foot) foot.textContent = "Multijoueur temps réel · " + APP_VERSION;
+
     const params = new URLSearchParams(location.search);
     const mock = params.get("mock");
     if (mock) {

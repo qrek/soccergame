@@ -381,7 +381,11 @@ function serveStatic(req, res) {
   if (!filePath.startsWith(PUBLIC_DIR)) { res.writeHead(403); return res.end("Forbidden"); }
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); return res.end("Not found"); }
-    res.writeHead(200, { "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream" });
+    res.writeHead(200, {
+      "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream",
+      // Toujours revalider : les téléphones ne gardent pas d'anciennes versions.
+      "Cache-Control": "no-cache, must-revalidate",
+    });
     res.end(data);
   });
 }

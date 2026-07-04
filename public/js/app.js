@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v29 — penalties interactifs, blocs FM, cartons";
+  const APP_VERSION = "v30 — le penalty se joue sur la pelouse";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -669,7 +669,7 @@
       state.liveRoundKey = roundKey;
       state.liveSimKey = simKey;
       buildLiveSkeleton(p, featured, mine === featured ? mine : null, isLocal);
-      state.sim = featured ? buildSim(featured) : null;
+      state.sim = featured ? buildSim(featured, p.penHoldMs || 0) : null;
     }
 
     clearInterval(liveInterval);
@@ -763,7 +763,7 @@
   // un receveur précis. Conduites, passes, interceptions, dernière passe au
   // tireur, relances du gardien : tout est scripté de façon déterministe,
   // puis rendu avec des vitesses de course plafonnées (rien ne "flotte").
-  function buildScript(match, dots, events, rng) {
+  function buildScript(match, dots, events, rng, penLive) {
     const DUR = match.dur || 90;
     const outfield = (side) => dots.filter((d) => d.side === side && d.pos !== "GK");
     const gkOf = (side) => dots.find((d) => d.side === side && d.pos === "GK") || dots[0];
@@ -834,14 +834,17 @@
         }
         sb = { x: ev.x, y: ev.y }; t = ev.m - LEAD - 0.05; carrier = shooterDot; poss = ev.side;
       }
-      if (t < ev.m - LEAD) { segs.push({ type: "hold", t0: t, t1: ev.m - LEAD, c: carrier.idx, to: sb }); t = ev.m - LEAD; }
+      // Penalty joué en fenêtre interactive : le vol du ballon est joué par la
+      // scène dédiée (penScene) pendant le gel — le script attend sur le point.
+      const flyFrom = penLive && ev.pen ? ev.m : ev.m - LEAD;
+      if (t < flyFrom) { segs.push({ type: "hold", t0: t, t1: flyFrom, c: carrier.idx, to: sb }); t = flyFrom; }
       const right = ev.side === "a";
       let end;
       if (ev.type === "goal") end = { x: right ? 99.4 : 0.6, y: 29 + rng() * 6 };
       else if (ev.type === "saved") end = { x: right ? 96.6 : 3.4, y: 29.5 + rng() * 5 };
       else if (ev.type === "post") end = { x: right ? 98.6 : 1.4, y: rng() < 0.5 ? 26.4 : 37.6 };
       else end = { x: right ? 99.6 : 0.4, y: rng() < 0.5 ? 17 : 45 };
-      segs.push({ type: "shot", t0: Math.max(0, Math.min(t, ev.m - LEAD)), t1: ev.m, c: ev.shooter ? ev.shooter.idx : -1, from: { x: ev.x, y: ev.y }, to: end, ev });
+      segs.push({ type: "shot", t0: Math.max(0, Math.min(t, flyFrom)), t1: ev.m, c: ev.shooter ? ev.shooter.idx : -1, from: { x: ev.x, y: ev.y }, to: end, ev });
       sb = end; t = ev.m;
       const defSide = right ? "b" : "a";
       poss = defSide;
@@ -905,7 +908,7 @@
   }
 
   // Construit la scène (22 joueurs + ballon) et l'état de simulation.
-  function buildSim(match) {
+  function buildSim(match, penHold) {
     const A = teamSetup(match.a, "a"), B = teamSetup(match.b, "b");
     if (A.kit.toLowerCase() === B.kit.toLowerCase()) { B.kit = "#f1f3f5"; B.kitFull = { p: "#f1f3f5", s: "#20342a", pat: B.kitFull.pat }; }
     const rng = mulberry(((match.a * 73856093) ^ (match.b * 19349663)) >>> 0);
@@ -915,17 +918,25 @@
     }));
     const dots = mk(A, "a").concat(mk(B, "b"));
     dots.forEach((d, i) => { d.idx = i; });
+    // Continuité : si une simulation tournait déjà (rebuild après penalty,
+    // consigne tactique…), chaque joueur repart de sa position actuelle.
+    if (state.sim && state.sim.dots) {
+      for (const d of dots) {
+        const prev = state.sim.dots.find((o) => o.name === d.name && o.side === d.side);
+        if (prev) { d.x = prev.x; d.y = prev.y; }
+      }
+    }
     const events = (match.events || [])
       .filter((ev) => ev.type === "goal" || ev.type === "saved" || ev.type === "off" || ev.type === "post")
       .slice().sort((x, y) => x.m - y.m).map((ev) => ({
-      m: ev.m, type: ev.type, side: ev.side,
+      m: ev.m, type: ev.type, side: ev.side, pen: !!ev.pen,
       x: clampV(ev.x, 4, 96), y: clampV(ev.y * 0.64, 6, 58),
       shooter: dots.find((d) => d.side === ev.side && d.name === ev.scorer) || null,
     }));
     const svgDots = dots.map((d, i) => {
       // le gardien reste en couleur unie cerclée de jaune pour rester lisible
       const fill = d.pos === "GK" ? (d.side === "a" ? A.kit : B.kit) : `url(#kit${d.side})`;
-      return `<circle id="sd${i}" cx="${d.home.x.toFixed(1)}" cy="${d.home.y.toFixed(1)}" r="2" fill="${fill}" stroke="${d.pos === "GK" ? "#ffd54a" : "rgba(255,255,255,.6)"}" stroke-width="${d.pos === "GK" ? 0.6 : 0.4}"/>`;
+      return `<circle id="sd${i}" cx="${d.x.toFixed(1)}" cy="${d.y.toFixed(1)}" r="2" fill="${fill}" stroke="${d.pos === "GK" ? "#ffd54a" : "rgba(255,255,255,.6)"}" stroke-width="${d.pos === "GK" ? 0.6 : 0.4}"/>`;
     }).join("");
     $("live-stage").innerHTML = `<div class="fm-pitch replay"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
       <defs>${kitPatternDef("kita", A.kitFull)}${kitPatternDef("kitb", B.kitFull)}</defs>
@@ -933,7 +944,8 @@
       <circle id="sim-ball" cx="50" cy="32" r="1.15" fill="#fff" stroke="rgba(0,0,0,.45)" stroke-width="0.3"/>
     </svg></div>`;
     dots.forEach((d, i) => { d.el = document.getElementById("sd" + i); });
-    return { dots, ballEl: document.getElementById("sim-ball"), segs: buildScript(match, dots, events, rng), events, segIdx: 0, lastNow: 0,
+    return { dots, ballEl: document.getElementById("sim-ball"), segs: buildScript(match, dots, events, rng, penHold > 0), events, segIdx: 0, lastNow: 0,
+      penLive: penHold > 0, lp: match.livePen || null,
       ambient: buildAmbient(match, mulberry(((match.a * 2654435761) ^ (match.b * 40503)) >>> 0)) };
   }
 
@@ -949,6 +961,9 @@
     const dt = Math.min(0.08, Math.max(0, (now - (sim.lastNow || now)) / 1000));
     sim.lastNow = now;
 
+    // Fenêtre de penalty (mode serveur) : scène dédiée jouée sur la pelouse.
+    if (mc.holding && mc.holding.pen && sim.penLive) { penScene(sim, mc, now, dt); return; }
+    if (sim.penKey) { sim.penKey = null; sim.penT0 = 0; sim.penDone = false; }
     // Célébration : TOUT est figé, seul le buteur exulte.
     if (mc.holding) {
       const ge = sim.events.find((e) => e.type === "goal" && e.m === mc.holding.m && e.side === mc.holding.side);
@@ -1044,6 +1059,87 @@
     sim.ballEl.setAttribute("cy", clampV(by, 2, 62).toFixed(2));
   }
 
+  // Scène de penalty pendant la fenêtre interactive : tout le monde se place
+  // (tireur au point, gardien sur sa ligne, les 20 autres à l'entrée de la
+  // surface), suspense tant que les choix ne sont pas faits, puis élan, tir
+  // vers le côté choisi, plongeon du gardien et joie/dépit — le son et le
+  // panneau ne révèlent l'issue qu'à l'arrivée du ballon (sim.penDone).
+  function penScene(sim, mc, now, dt) {
+    const ev = mc.holding;
+    const right = ev.side === "a", dir = right ? 1 : -1;
+    const spot = { x: right ? 90 : 10, y: 32 };
+    const key = ev.m + "|" + ev.side;
+    if (sim.penKey !== key) { sim.penKey = key; sim.penT0 = 0; sim.penDone = false; }
+    const kicker = sim.dots.find((d) => d.side === ev.side && d.name === ev.scorer)
+      || sim.dots.find((d) => d.side === ev.side && d.pos === "FWD")
+      || sim.dots.find((d) => d.side === ev.side && d.pos !== "GK");
+    const gk = sim.dots.find((d) => d.side !== ev.side && d.pos === "GK");
+
+    let ball = { x: spot.x, y: spot.y };
+    let kickTo = { x: spot.x - dir * 5, y: spot.y + 0.6 }, kickSp = 9;
+    let gkTo = { x: right ? 96.9 : 3.1, y: 32 + Math.sin(now / 260) * 1.5 }, gkSp = 4.5;
+    const resolved = !ev.pending && ev.type !== "pen";
+    if (resolved) {
+      if (!sim.penT0) sim.penT0 = now;
+      const tt = (now - sim.penT0) / 1000;
+      const lp = sim.lp || {};
+      const yOf = (c) => (c === "L" ? 27.2 : c === "R" ? 36.8 : 32);
+      const dirC = lp.dir || (ev.type === "off" ? "R" : "C");
+      const diveC = lp.dive || (ev.type === "saved" ? dirC : (dirC === "L" ? "R" : "L"));
+      let end;
+      if (ev.type === "goal") end = { x: right ? 99.2 : 0.8, y: yOf(dirC) };
+      else if (ev.type === "saved") end = { x: right ? 96.6 : 3.4, y: yOf(dirC) };
+      else end = { x: right ? 99.7 : 0.3, y: dirC === "L" ? 19.5 : 44.5 };
+      const RUN = 1.0, FLY = 0.45; // secondes réelles : élan, puis vol du ballon
+      if (tt < RUN) { kickTo = { x: spot.x - dir * (5 - 4 * (tt / RUN)), y: spot.y }; kickSp = 11; }
+      else {
+        kickTo = { x: spot.x - dir * 1.4, y: spot.y }; kickSp = 8;
+        const u = clampV((tt - RUN) / FLY, 0, 1);
+        const uu = 1 - Math.pow(1 - u, 1.5);
+        ball = { x: spot.x + (end.x - spot.x) * uu, y: spot.y + (end.y - spot.y) * uu };
+        gkTo = { x: right ? 96.9 : 3.1, y: yOf(diveC) }; gkSp = 15;
+        if (u >= 1) {
+          if (!sim.penDone) {
+            sim.penDone = true;
+            if (ev.type === "goal") { SND.goal(); vibe(160); } else { SND.ooh(); vibe(70); }
+          }
+          if (ev.type === "saved") { ball = end; gkTo.y = end.y; }
+          if (ev.type === "goal") { kickTo = { x: clampV(spot.x - dir * 16, 4, 96), y: 13 }; kickSp = 11; }
+        }
+      }
+      if (sim.penDone && ev.type === "goal" && kicker && kicker.el)
+        kicker.el.setAttribute("r", (2 + Math.abs(Math.sin(tt * 6)) * 0.8).toFixed(2));
+    }
+
+    const edgeX = right ? 81.5 : 18.5; // entrée de la surface
+    const others = sim.dots.filter((d) => d !== kicker && d !== gk && d.pos !== "GK")
+      .sort((u, v) => u.home.y - v.home.y);
+    const n = Math.max(1, others.length - 1);
+    for (const d of sim.dots) {
+      let tx, ty, sp = 5;
+      if (d === kicker) { tx = kickTo.x; ty = kickTo.y; sp = kickSp; }
+      else if (d === gk) { tx = gkTo.x; ty = gkTo.y; sp = gkSp; }
+      else if (d.pos === "GK") { tx = d.home.x; ty = d.home.y; sp = 4; } // l'autre gardien reste chez lui
+      else {
+        const i = others.indexOf(d);
+        tx = edgeX + (d.side === ev.side ? -dir * 2.6 : 0) + ((i % 3) - 1) * 1.1;
+        ty = 7 + (i / n) * 50;
+        sp = 9; // tout le monde rejoint vite l'entrée de la surface
+      }
+      tx += Math.sin((now / 1000) * d.w1 + d.ph1) * 0.5;
+      ty += Math.cos((now / 1000) * d.w2 + d.ph2) * 0.5;
+      const dx = tx - d.x, dy = ty - d.y, dist = Math.hypot(dx, dy) || 0.0001;
+      const step = Math.min(dist, sp * dt);
+      d.x = clampV(d.x + (dx / dist) * step, 2.5, 97.5);
+      d.y = clampV(d.y + (dy / dist) * step, 3, 61);
+      if (!(sim.penDone && d === kicker) && d.el.getAttribute("r") !== "2") d.el.setAttribute("r", "2");
+      d.el.setAttribute("cx", d.x.toFixed(2));
+      d.el.setAttribute("cy", d.y.toFixed(2));
+    }
+    sim.ballEl.setAttribute("cx", clampV(ball.x, 0.5, 99.5).toFixed(2));
+    sim.ballEl.setAttribute("cy", clampV(ball.y, 2, 62).toFixed(2));
+  }
+
   // Homme du match : meilleur buteur, sinon gardien décisif, sinon plus remuant.
   function motmOf(events) {
     const evs = events || [];
@@ -1085,17 +1181,19 @@
       // "ooh" sur occasion, triple sifflet au coup de sifflet final.
       const snd = state.snd || (state.snd = {});
       if (snd.round !== state.liveRoundKey) { snd.round = state.liveRoundKey; snd.holdKey = null; snd.ft = false; snd.seen = 0; SND.whistle(1); }
+      // Pendant une fenêtre de penalty, sons et révélations attendent que le
+      // ballon arrive (penScene pose sim.penDone) — pas de spoiler.
+      const isPenHold = !!(mc.holding && mc.holding.pen && state.sim && state.sim.penLive);
       if (mc.holding) {
-        const resolvedPen = mc.holding.pen && !mc.holding.pending;
         const hk = mc.holding.m + "|" + mc.holding.scorer + "|" + (mc.holding.pending ? "?" : mc.holding.type);
         if (snd.holdKey !== hk) {
           snd.holdKey = hk;
           const mySide = featured.a === state.pid ? "a" : featured.b === state.pid ? "b" : null;
           if (mc.holding.pending) { SND.whistle(1); vibe(120); } // faute sifflée !
-          else if (mc.holding.type === "goal") {
+          else if (!isPenHold && mc.holding.type === "goal") {
             SND.goal();
             vibe(mc.holding.side === mySide ? [90, 50, 90, 50, 280] : 160);
-          } else if (resolvedPen) { SND.ooh(); vibe(80); } // penalty raté/arrêté
+          }
         }
       }
       if (mc.ft && !snd.ft) { snd.ft = true; SND.whistle(3); }
@@ -1127,7 +1225,12 @@
       // Célébration : l'horloge est figée sur le but -> grande animation.
       // (deux buts à la même minute enchaînent deux célébrations distinctes)
       let ovEl = document.getElementById("goal-overlay");
-      if (mc.holding) {
+      // L'overlay n'apparaît que pour un VRAI but : jamais pendant qu'un
+      // penalty se prépare, et pour un penalty transformé seulement une fois
+      // le ballon au fond (la scène du terrain reste visible avant ça).
+      const showOv = mc.holding && mc.holding.type === "goal" && !mc.holding.pending
+        && (!isPenHold || (state.sim && state.sim.penDone));
+      if (showOv) {
         const okey = mc.holding.m + "|" + mc.holding.scorer;
         if (ovEl && ovEl.dataset.k !== okey) { ovEl.remove(); ovEl = null; }
         if (!ovEl) {
@@ -1202,22 +1305,26 @@
       const iDive = (lp.side === "a" ? featured.b : featured.a) === state.pid;
       const pickedKey = "lp:" + featured.a + ":" + featured.b + ":" + lp.m + ":" + state.pid;
       const canPick = lp.phase === "await" && state.penPicked !== pickedKey && (iKick || iDive);
+      // Le panneau ne révèle l'issue qu'une fois le ballon arrivé dans la
+      // scène du terrain (sim.penDone) — l'élan et le vol restent du suspense.
+      const revealed = lp.phase !== "await" && (!state.sim || !state.sim.penLive || state.sim.penDone);
       const outLine = lp.out === "goal" ? `✅ BUT ! ${esc(lp.scorer)} transforme !`
         : lp.out === "saved" ? `🧤 ARRÊTÉ ! ${esc(lp.gkName)} était du bon côté !`
         : `❌ À CÔTÉ ! ${esc(lp.scorer)} manque le cadre !`;
       setHtml($("shootout"), `
         <div class="pen-panel">
           <div class="pen-title">🎯 PENALTY À LA ${lp.m}ᵉ !</div>
-          ${lp.phase === "await"
-            ? `<div class="pen-now">⚽ <b>${esc(lp.scorer)}</b> face à <b>${esc(lp.gkName)}</b>… <span class="pen-timer">${secs}s</span></div>`
+          ${!revealed
+            ? `<div class="pen-now">⚽ <b>${esc(lp.scorer)}</b> face à <b>${esc(lp.gkName)}</b>… ${lp.phase === "await" ? `<span class="pen-timer">${secs}s</span>` : "🥁"}</div>`
             : `${penCage(lp.dir, lp.dive, lp.out)}<div class="pen-now ${lp.out === "goal" ? "ok" : "ko"}">${outLine}</div>`}
           ${canPick ? `<div class="pen-q">${iKick ? "Où tires-tu ?" : "Où plonge ton gardien ?"}</div>${penBtns(iKick ? "kick" : "dive")}`
             : (lp.phase === "await" && (iKick || iDive) ? '<p class="hint">✓ Choix enregistré — suspense…</p>' : "")}
         </div>`);
-      // son de révélation (une seule fois par penalty)
+      // son de révélation (une seule fois par penalty) — la scène du terrain
+      // s'en charge quand elle tourne, ceci n'est qu'un filet de sécurité
       const snd2 = state.snd || (state.snd = {});
       const lpKey = featured.a + ":" + featured.b + ":" + lp.m + ":" + lp.phase;
-      if (lp.phase === "reveal" && snd2.lpKey !== lpKey) {
+      if (lp.phase === "reveal" && snd2.lpKey !== lpKey && (!state.sim || !state.sim.penLive)) {
         snd2.lpKey = lpKey;
         if (lp.out === "goal") SND.goal(); else SND.ooh();
       }

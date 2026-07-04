@@ -246,16 +246,21 @@
       st.ballEl.setAttribute("cx", clamp(x, 0.5, 99.5).toFixed(2));
       st.ballEl.setAttribute("cy", clamp(y, 2, 62).toFixed(2));
     };
-    // Course plafonnée vers (tx,ty) à sp unités/seconde + rendu du joueur.
+    // Course vers (tx,ty), plafonnée à sp unités/seconde, avec INERTIE :
+    // accélération progressive, virages arrondis, arrivée amortie — et un
+    // léger transfert d'appuis à l'arrêt (lent, pas un tremblement).
+    // d.vx/d.vy = vitesse courante (unités/s), sert aussi à orienter le ballon.
     const step = (d, tx, ty, sp, dt, now, wob) => {
-      const w = wob == null ? 0.8 : wob;
-      tx += Math.sin((now / 1000) * d.w1 + d.ph1) * w;
-      ty += Math.cos((now / 1000) * d.w2 + d.ph2) * w * 0.9;
+      const w = wob == null ? 0.35 : wob;
+      tx += Math.sin((now / 1500) * (0.6 + d.w1) + d.ph1) * w;
+      ty += Math.cos((now / 1700) * (0.6 + d.w2) + d.ph2) * w;
       const dx = tx - d.x, dy = ty - d.y, dist = Math.hypot(dx, dy) || 0.0001;
-      const s = Math.min(dist, sp * dt);
-      d.vx = (dx / dist) * s; d.vy = (dy / dist) * s;
-      d.x = clamp(d.x + d.vx, 2.5, 97.5);
-      d.y = clamp(d.y + d.vy, 3, 61);
+      const want = Math.min(dist * 3.2, sp); // on freine en approche
+      const k = 1 - Math.exp(-dt * 5.5);     // inertie de course
+      d.vx = (d.vx || 0) + ((dx / dist) * want - (d.vx || 0)) * k;
+      d.vy = (d.vy || 0) + ((dy / dist) * want - (d.vy || 0)) * k;
+      d.x = clamp(d.x + d.vx * dt, 2.5, 97.5);
+      d.y = clamp(d.y + d.vy * dt, 3, 61);
       d.el.setAttribute("cx", d.x.toFixed(2));
       d.el.setAttribute("cy", d.y.toFixed(2));
     };
@@ -409,13 +414,21 @@
         sup1 = mates[0] || null; sup2 = mates[1] || null;
       }
 
+      // dernier rideau de chaque équipe : sert de ligne de hors-jeu visuelle
+      // et permet à la défense de monter/descendre EN BLOC, alignée
+      const defsA = [], defsB = [];
+      for (const d of st.dots) if (d.pos === "DEF") (d.side === "a" ? defsA : defsB).push(d);
+      const lineA = defsA.length ? Math.min.apply(null, defsA.map((d) => d.x)) : 12; // a défend à gauche
+      const lineB = defsB.length ? Math.max.apply(null, defsB.map((d) => d.x)) : 88; // b défend à droite
+      const meanA = defsA.reduce((s, d) => s + d.hx, 0) / (defsA.length || 1);
+      const meanB = defsB.reduce((s, d) => s + d.hx, 0) / (defsB.length || 1);
+
       // les blocs coulissent avec le ballon ; l'équipe en possession pousse
       const slideX = clamp((tb.x - 50) * 0.45, -17, 17);
       for (const d of st.dots) {
         const shiftK = d.pos === "MID" ? 0.22 : d.pos === "FWD" ? 0.20 : 0.15;
         const dirD = d.side === "a" ? 1 : -1;
-        // les défenseurs reculent moins : la ligne ne se colle pas au but
-        const push = (d.side === poss ? 4.5 : -6.5) * (d.pos === "DEF" ? 0.55 : 1);
+        const push = (d.side === poss ? 3.5 : -5) * (d.pos === "DEF" ? 0.55 : 1);
         let tx = clamp(d.hx + slideX + dirD * push + clamp((tb.x - d.hx) * shiftK, -9, 9) * 0.5, 3, 97);
         let ty = d.hy + clamp((tb.y - d.hy) * (shiftK + 0.05), -9, 9);
         let sp = 4.5;
@@ -423,19 +436,37 @@
           tx = d.hx; ty = clamp(32 + (tb.y - 32) * 0.25, 25, 39); sp = 5;
           if (seg.mode === "shot" && d.side === defSide) { ty = clamp(seg.y1, 25.5, 38.5); sp = 16; } // il plonge
         } else if (d === holder) { tx = seg.x1; ty = seg.y1; sp = 8; }
-        else if (d === receiver) { tx = seg.x1; ty = seg.y1; sp = 12; }
+        else if (d === receiver) { tx = seg.x1; ty = seg.y1; sp = 10; }
         else if (d === nextRec) { tx = nextSpot.x; ty = nextSpot.y; sp = 6.5; }
-        else if (d === presser) { tx = tb.x + (d.x - tb.x) * 0.1; ty = tb.y + (d.y - tb.y) * 0.1; sp = 9; }
+        else if (d === presser) { tx = tb.x + (d.x - tb.x) * 0.1; ty = tb.y + (d.y - tb.y) * 0.1; sp = 8.5; }
         else if (d === sup1 || d === sup2) {
           const dir = holder.side === "a" ? 1 : -1;
           tx = clamp(holder.x + dir * (d === sup1 ? 9 : -5), 3, 97);
           ty = clamp(holder.y + (d === sup1 ? -7 : 7), 4, 60);
           sp = 6;
-        } else if (d.side === poss && d.pos === "FWD" && ((poss === "a" && tb.x > 62) || (poss === "b" && tb.x < 38))) {
-          // les attaquants plongent vers la surface quand le ballon approche
-          tx = clamp(d.hx + slideX * 0.6 + (poss === "a" ? 14 : -14), 3, 97);
-          ty = d.hy + (32 - d.hy) * 0.25;
-          sp = 5.5;
+        } else {
+          if (d.pos === "DEF") {
+            // ligne à plat : les défenseurs bougent ensemble, resserrés
+            const mean = d.side === "a" ? meanA : meanB;
+            const lineX = clamp(mean + slideX * 0.65 + dirD * push,
+              d.side === "a" ? 6 : 52, d.side === "a" ? 48 : 94);
+            tx = lineX + (d.hx - mean) * 0.4;
+          } else if (d.pos === "FWD" && d.side === poss
+            && ((poss === "a" && tb.x > 62) || (poss === "b" && tb.x < 38))) {
+            // appel dans la surface quand le ballon approche
+            tx = clamp(d.hx + slideX * 0.6 + (poss === "a" ? 14 : -14), 3, 97);
+            ty = d.hy + (32 - d.hy) * 0.25;
+            sp = 5.5;
+          } else if (d.pos === "FWD" && d.side !== poss) {
+            // l'attaquant qui subit ne redescend pas défendre dans sa surface
+            tx = d.side === "a" ? Math.max(tx, 36) : Math.min(tx, 64);
+          }
+          if (d.pos === "FWD" && d.side === poss) {
+            // discipline de hors-jeu : on reste au niveau du dernier défenseur
+            // (sauf si le ballon a déjà cassé la ligne)
+            if (d.side === "a") tx = Math.min(tx, Math.max(lineB + 0.4, tb.x));
+            else tx = Math.max(tx, Math.min(lineA - 0.4, tb.x));
+          }
         }
         resetR(d);
         step(d, tx, ty, sp, dt, now);
@@ -443,7 +474,7 @@
       // ballon : au pied du porteur pendant une conduite, sinon sur sa trajectoire
       if (holder && (seg.mode === "carry" || seg.mode === "dead")) {
         const vn = Math.hypot(holder.vx || 0, holder.vy || 0);
-        if (vn > 0.02) setBall(holder.x + (holder.vx / vn) * 1.2, holder.y + (holder.vy / vn) * 1.2);
+        if (vn > 0.4) setBall(holder.x + (holder.vx / vn) * 1.2, holder.y + (holder.vy / vn) * 1.2);
         else setBall(holder.x + (holder.side === "a" ? 1 : -1), holder.y);
       } else setBall(tb.x, tb.y);
     };

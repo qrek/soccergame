@@ -177,6 +177,7 @@ function snapshot(room) {
   const snap = {
     code: room.code,
     phase: room.phase,
+    now: Date.now(), // horloge serveur : le client corrige son propre décalage
     hostPid: room.hostPid,
     squadSize: room.squadSize,
     theme: room.theme,

@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v30 — le penalty se joue sur la pelouse";
+  const APP_VERSION = "v31 — simulation du terrain réécrite de zéro";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -330,7 +330,10 @@
     const es = new EventSource(`events?code=${state.code}&pid=${state.pid}`);
     state.es = es;
     es.addEventListener("state", (e) => {
-      state.snap = JSON.parse(e.data); render();
+      state.snap = JSON.parse(e.data);
+      // écart horloge client/serveur (les téléphones dérivent facilement)
+      state.clockOffset = state.snap && state.snap.now ? state.snap.now - Date.now() : 0;
+      render();
       // Mode capture : fermer le flux après le premier rendu pour les screenshots.
       if (new URLSearchParams(location.search).has("shot")) setTimeout(() => es.close(), 300);
     });
@@ -456,7 +459,7 @@
   function openLiveTable() {
     const s0 = state.snap; if (!s0 || !s0.playing) return;
     const p = s0.playing;
-    const elapsed = Date.now() - p.startedAt;
+    const elapsed = liveElapsed(p);
     const hold = p.goalHoldMs || 3500;
     const current = p.type === "league" ? p.matches.map((m) => {
       const mc = matchClock(elapsed, frzOf(m, p), p.clockMs, m.dur);
@@ -494,7 +497,7 @@
     const labelOf = (left) => ({ 1: "Finale", 2: "Demi-finales", 3: "Quarts" })[left] || "Tour";
 
     // — Poule : classement live (matchs passés + minute courante des matchs du jour)
-    const elapsed = Date.now() - p.startedAt;
+    const elapsed = liveElapsed(p);
     const current = p.type === "league" ? p.matches.map((m) => {
       const mc = matchClock(elapsed, frzOf(m, p), p.clockMs, m.dur);
       const sc = scoreAt(m, mc.minute);
@@ -645,6 +648,13 @@
   const frzOf = (m, p) => ENGINE.freezesOf(m, p.goalHoldMs || 3500, p.penHoldMs || 0);
   const goalsOf = (m) => (m.events || []).filter((e) => e.type === "goal").sort((a, b) => a.m - b.m);
 
+  // Horloge alignée sur le serveur : les téléphones ont souvent quelques
+  // secondes (voire minutes) de décalage — sans correction, le direct peut
+  // démarrer figé ou afficher « TERMINÉ » d'entrée. snap.now donne l'heure
+  // du serveur à chaque diffusion ; on en déduit l'écart local.
+  const srvNow = () => Date.now() + (state.clockOffset || 0);
+  const liveElapsed = (p) => srvNow() - p.startedAt;
+
   function renderPlaying(s) {
     clearInterval(timerInterval);
     const p = s.playing; if (!p) return;
@@ -669,7 +679,9 @@
       state.liveRoundKey = roundKey;
       state.liveSimKey = simKey;
       buildLiveSkeleton(p, featured, mine === featured ? mine : null, isLocal);
-      state.sim = featured ? buildSim(featured, p.penHoldMs || 0) : null;
+      state.ambient = featured
+        ? buildAmbient(featured, mulberry(((featured.a * 2654435761) ^ (featured.b * 40503)) >>> 0)) : [];
+      state.sim = featured ? mountSim(featured, p) : null;
     }
 
     clearInterval(liveInterval);
@@ -680,10 +692,9 @@
     // Boucle fluide (60 fps) : positions des joueurs et du ballon.
     cancelAnimationFrame(state.simRaf);
     if (featured && state.sim) {
-      const hold = p.goalHoldMs || 3500;
       const loop = () => {
         if (!state.snap || state.snap.phase !== "playing" || !state.sim) return;
-        simTick(state.sim, matchClock(Date.now() - p.startedAt, frzOf(featured, p), p.clockMs, featured.dur), Date.now());
+        state.sim.draw(matchClock(liveElapsed(p), frzOf(featured, p), p.clockMs, featured.dur), Date.now(), featured.livePen);
         state.simRaf = requestAnimationFrame(loop);
       };
       state.simRaf = requestAnimationFrame(loop);
@@ -746,138 +757,13 @@
     return { dots, kit: kitFull.p, kitFull };
   }
 
-  // ---------- Simulation continue du match (11v11 fluide) ----------
-  // Le ballon suit une trajectoire déterministe (circulation, montées vers
-  // chaque action, relances) ; les 22 joueurs gravitent autour : maintien de
-  // la formation, pressing du plus proche, course du tireur, gardiens qui
-  // suivent. Le tout est piloté par l'horloge du match : pendant la pause
-  // célébration d'un but, TOUT est figé, puis engagement au centre.
-  const clampV = (v, a, b) => Math.max(a, Math.min(b, v));
+  // ---------- Simulation du terrain ----------
+  // Le moteur (timeline de possession + rendu 60 fps + scènes de penalty et
+  // de célébration) vit dans sim.js — réécrit de zéro en v31. Ici, on ne
+  // garde que le montage (mountSim) et les commentaires d'ambiance du fil.
   function mulberry(seed) {
     let a = seed >>> 0;
     return function () { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-  }
-
-  // ---------- Script de possession façon FM ----------
-  // Le ballon est TOUJOURS au pied d'un porteur ou en passe rectiligne vers
-  // un receveur précis. Conduites, passes, interceptions, dernière passe au
-  // tireur, relances du gardien : tout est scripté de façon déterministe,
-  // puis rendu avec des vitesses de course plafonnées (rien ne "flotte").
-  function buildScript(match, dots, events, rng, penLive) {
-    const DUR = match.dur || 90;
-    const outfield = (side) => dots.filter((d) => d.side === side && d.pos !== "GK");
-    const gkOf = (side) => dots.find((d) => d.side === side && d.pos === "GK") || dots[0];
-    const nearestTo = (list, pt) => list.slice().sort((u, v) => Math.hypot(u.home.x - pt.x, u.home.y - pt.y) - Math.hypot(v.home.x - pt.x, v.home.y - pt.y))[0];
-    const centerMost = (list) => nearestTo(list, { x: 50, y: 32 });
-    const dirOf = (side) => (side === "a" ? 1 : -1);
-
-    const segs = [];
-    let t = 0.2;
-    let poss = events.length ? events[0].side : "a";
-    let sb = { x: 50, y: 32 };
-    let carrier = centerMost(outfield(poss));
-
-    const spotFor = (d, target) => ({
-      x: clampV(d.home.x + (target.x - d.home.x) * 0.35 + (rng() - 0.5) * 5, 3, 97),
-      y: clampV(d.home.y + (target.y - d.home.y) * 0.35 + (rng() - 0.5) * 5, 4, 60),
-    });
-
-    function chainTo(endT, ev) {
-      while (t < endT - 0.05 && segs.length < 1600) {
-        const steer = ev && t > ev.m - 6;
-        if (steer && poss !== ev.side) { poss = ev.side; carrier = nearestTo(outfield(poss), sb); }
-        // conduite de balle
-        const hd = Math.min(endT - t, 0.7 + rng() * 1.4);
-        const adv = { x: clampV(sb.x + dirOf(poss) * (2 + rng() * 6), 4, 96), y: clampV(sb.y + (rng() - 0.5) * 8, 5, 59) };
-        segs.push({ type: "hold", t0: t, t1: t + hd, c: carrier.idx, to: adv });
-        sb = adv; t += hd;
-        if (t >= endT - 0.05) break;
-        // passe (parfois interceptée)
-        let rec, final = false;
-        if (steer && ev.shooter && t >= endT - 1.6) { rec = ev.shooter; final = true; }
-        else if (!steer && rng() < 0.2) { poss = poss === "a" ? "b" : "a"; rec = nearestTo(outfield(poss), sb); }
-        else {
-          const mates = outfield(poss).filter((d) => d !== carrier);
-          const tgt = steer ? ev : { x: clampV(sb.x + dirOf(poss) * 18, 4, 96), y: sb.y };
-          mates.sort((u, v) => Math.hypot(u.home.x - tgt.x, u.home.y - tgt.y) - Math.hypot(v.home.x - tgt.x, v.home.y - tgt.y));
-          rec = mates[Math.floor(rng() * Math.min(3, mates.length))] || carrier;
-        }
-        const spot = final ? { x: ev.x, y: ev.y } : spotFor(rec, steer && ev ? ev : sb);
-        const pd = clampV(Math.hypot(spot.x - sb.x, spot.y - sb.y) / 28, 0.35, 0.9);
-        segs.push({ type: "pass", t0: t, t1: t + pd, c: rec.idx, from: sb, to: spot, fin: final });
-        sb = spot; t += pd; carrier = rec;
-        if (final) {
-          if (t < endT) segs.push({ type: "hold", t0: t, t1: endT, c: rec.idx, to: { x: ev.x, y: ev.y } });
-          t = endT; sb = { x: ev.x, y: ev.y };
-          return;
-        }
-      }
-    }
-
-    const LEAD = 0.7; // durée de vol du tir (visible à l'écran)
-    for (const ev of events) {
-      chainTo(ev.m - LEAD - 0.05, ev);
-      // Garantie : le ballon DOIT être au point de tir, dans les pieds du
-      // tireur, avant la frappe — sinon passe corrective express.
-      const shooterDot = ev.shooter || nearestTo(outfield(ev.side), ev);
-      // But rapproché du précédent : les segments d'après-but débordent sur
-      // l'action suivante — on les écourte pour laisser passe + tir visibles.
-      if (t > ev.m - LEAD - 0.1) {
-        const cut = Math.max(0.2, ev.m - LEAD - 0.55);
-        for (const g of segs) { if (g.t1 > cut) g.t1 = Math.max(g.t0, cut); }
-        t = cut;
-      }
-      if (Math.hypot(sb.x - ev.x, sb.y - ev.y) > 4) {
-        const p0 = Math.max(0, Math.min(t, ev.m - LEAD - 0.4));
-        if (ev.m - LEAD - 0.05 > p0 + 0.05) {
-          segs.push({ type: "pass", t0: p0, t1: ev.m - LEAD - 0.05, c: shooterDot.idx, from: sb, to: { x: ev.x, y: ev.y }, fin: true });
-        }
-        sb = { x: ev.x, y: ev.y }; t = ev.m - LEAD - 0.05; carrier = shooterDot; poss = ev.side;
-      }
-      // Penalty joué en fenêtre interactive : le vol du ballon est joué par la
-      // scène dédiée (penScene) pendant le gel — le script attend sur le point.
-      const flyFrom = penLive && ev.pen ? ev.m : ev.m - LEAD;
-      if (t < flyFrom) { segs.push({ type: "hold", t0: t, t1: flyFrom, c: carrier.idx, to: sb }); t = flyFrom; }
-      const right = ev.side === "a";
-      let end;
-      if (ev.type === "goal") end = { x: right ? 99.4 : 0.6, y: 29 + rng() * 6 };
-      else if (ev.type === "saved") end = { x: right ? 96.6 : 3.4, y: 29.5 + rng() * 5 };
-      else if (ev.type === "post") end = { x: right ? 98.6 : 1.4, y: rng() < 0.5 ? 26.4 : 37.6 };
-      else end = { x: right ? 99.6 : 0.4, y: rng() < 0.5 ? 17 : 45 };
-      segs.push({ type: "shot", t0: Math.max(0, Math.min(t, flyFrom)), t1: ev.m, c: ev.shooter ? ev.shooter.idx : -1, from: { x: ev.x, y: ev.y }, to: end, ev });
-      sb = end; t = ev.m;
-      const defSide = right ? "b" : "a";
-      poss = defSide;
-      if (ev.type === "goal") {
-        carrier = centerMost(outfield(poss));
-        // le ballon revient de la cage vers le rond central (pas de saut)
-        segs.push({ type: "pass", t0: t, t1: t + 0.5, c: carrier.idx, from: sb, to: { x: 50, y: 32 } });
-        sb = { x: 50, y: 32 }; t += 0.5;
-        segs.push({ type: "hold", t0: t, t1: t + 0.6, c: carrier.idx, to: { x: 50, y: 32 } });
-        t += 0.6;
-      } else {
-        carrier = ev.type === "post" ? nearestTo(outfield(poss), sb) : gkOf(poss);
-        const cs = { x: carrier.home.x, y: carrier.home.y };
-        segs.push({ type: "pass", t0: t, t1: t + 0.55, c: carrier.idx, from: sb, to: cs });
-        sb = cs; t += 0.55;
-        segs.push({ type: "hold", t0: t, t1: t + 0.8, c: carrier.idx, to: cs });
-        t += 0.8;
-      }
-    }
-    chainTo(DUR - 0.4, null);
-    segs.push({ type: "hold", t0: t, t1: DUR + 1, c: carrier.idx, to: sb });
-    return segs;
-  }
-
-  // Motif de remplissage reprenant le maillot (rayures, cerceaux...).
-  function kitPatternDef(id, kit) {
-    const p = kit.p, sc = kit.s || "#ffffff", pat = kit.pat || "plain";
-    let inner = `<rect width="1" height="1" fill="${p}"/>`;
-    if (pat === "stripes") inner += `<rect x="0.12" width="0.16" height="1" fill="${sc}"/><rect x="0.44" width="0.16" height="1" fill="${sc}"/><rect x="0.76" width="0.16" height="1" fill="${sc}"/>`;
-    else if (pat === "hoops") inner += `<rect y="0.12" width="1" height="0.16" fill="${sc}"/><rect y="0.44" width="1" height="0.16" fill="${sc}"/><rect y="0.76" width="1" height="0.16" fill="${sc}"/>`;
-    else if (pat === "sash") inner += `<rect x="-0.3" y="0.38" width="1.6" height="0.24" transform="rotate(45 0.5 0.5)" fill="${sc}"/>`;
-    else if (pat === "halves") inner += `<rect x="0.5" width="0.5" height="1" fill="${sc}"/>`;
-    return `<pattern id="${id}" patternUnits="objectBoundingBox" patternContentUnits="objectBoundingBox" width="1" height="1">${inner}</pattern>`;
   }
 
   // Commentaires d'ambiance (déterministes) pour habiller le fil du match.
@@ -908,236 +794,19 @@
   }
 
   // Construit la scène (22 joueurs + ballon) et l'état de simulation.
-  function buildSim(match, penHold) {
+  // Monte la simulation du match vedette dans #live-stage (module SIM).
+  function mountSim(match, p) {
     const A = teamSetup(match.a, "a"), B = teamSetup(match.b, "b");
     if (A.kit.toLowerCase() === B.kit.toLowerCase()) { B.kit = "#f1f3f5"; B.kitFull = { p: "#f1f3f5", s: "#20342a", pat: B.kitFull.pat }; }
-    const rng = mulberry(((match.a * 73856093) ^ (match.b * 19349663)) >>> 0);
-    const mk = (team, side) => team.dots.map((d) => ({
-      name: d.n, pos: d.pos, side, home: d.p, x: d.p.x, y: d.p.y,
-      w1: 0.4 + rng() * 0.6, w2: 0.4 + rng() * 0.6, ph1: rng() * 6.28, ph2: rng() * 6.28,
-    }));
-    const dots = mk(A, "a").concat(mk(B, "b"));
-    dots.forEach((d, i) => { d.idx = i; });
-    // Continuité : si une simulation tournait déjà (rebuild après penalty,
-    // consigne tactique…), chaque joueur repart de sa position actuelle.
-    if (state.sim && state.sim.dots) {
-      for (const d of dots) {
-        const prev = state.sim.dots.find((o) => o.name === d.name && o.side === d.side);
-        if (prev) { d.x = prev.x; d.y = prev.y; }
-      }
-    }
-    const events = (match.events || [])
-      .filter((ev) => ev.type === "goal" || ev.type === "saved" || ev.type === "off" || ev.type === "post")
-      .slice().sort((x, y) => x.m - y.m).map((ev) => ({
-      m: ev.m, type: ev.type, side: ev.side, pen: !!ev.pen,
-      x: clampV(ev.x, 4, 96), y: clampV(ev.y * 0.64, 6, 58),
-      shooter: dots.find((d) => d.side === ev.side && d.name === ev.scorer) || null,
-    }));
-    const svgDots = dots.map((d, i) => {
-      // le gardien reste en couleur unie cerclée de jaune pour rester lisible
-      const fill = d.pos === "GK" ? (d.side === "a" ? A.kit : B.kit) : `url(#kit${d.side})`;
-      return `<circle id="sd${i}" cx="${d.x.toFixed(1)}" cy="${d.y.toFixed(1)}" r="2" fill="${fill}" stroke="${d.pos === "GK" ? "#ffd54a" : "rgba(255,255,255,.6)"}" stroke-width="${d.pos === "GK" ? 0.6 : 0.4}"/>`;
-    }).join("");
-    $("live-stage").innerHTML = `<div class="fm-pitch replay"><svg viewBox="0 0 100 64" preserveAspectRatio="none">
-      <defs>${kitPatternDef("kita", A.kitFull)}${kitPatternDef("kitb", B.kitFull)}</defs>
-      ${fmLinesSvg()}${svgDots}
-      <circle id="sim-ball" cx="50" cy="32" r="1.15" fill="#fff" stroke="rgba(0,0,0,.45)" stroke-width="0.3"/>
-    </svg></div>`;
-    dots.forEach((d, i) => { d.el = document.getElementById("sd" + i); });
-    return { dots, ballEl: document.getElementById("sim-ball"), segs: buildScript(match, dots, events, rng, penHold > 0), events, segIdx: 0, lastNow: 0,
-      penLive: penHold > 0, lp: match.livePen || null,
-      ambient: buildAmbient(match, mulberry(((match.a * 2654435761) ^ (match.b * 40503)) >>> 0)) };
-  }
-
-  // Une frame : segment actif, ballon au pied/en vol, courses plafonnées.
-  function simTick(sim, mc, now) {
-    const mf = mc.minuteF;
-    let seg = sim.segs[sim.segIdx];
-    if (!seg || mf < seg.t0 || mf >= seg.t1) {
-      let idx = sim.segs.findIndex((g) => mf >= g.t0 && mf < g.t1);
-      if (idx < 0) idx = mf >= 89 ? sim.segs.length - 1 : 0;
-      sim.segIdx = idx; seg = sim.segs[idx];
-    }
-    const dt = Math.min(0.08, Math.max(0, (now - (sim.lastNow || now)) / 1000));
-    sim.lastNow = now;
-
-    // Fenêtre de penalty (mode serveur) : scène dédiée jouée sur la pelouse.
-    if (mc.holding && mc.holding.pen && sim.penLive) { penScene(sim, mc, now, dt); return; }
-    if (sim.penKey) { sim.penKey = null; sim.penT0 = 0; sim.penDone = false; }
-    // Célébration : TOUT est figé, seul le buteur exulte.
-    if (mc.holding) {
-      const ge = sim.events.find((e) => e.type === "goal" && e.m === mc.holding.m && e.side === mc.holding.side);
-      if (ge && ge.shooter && ge.shooter.el) ge.shooter.el.setAttribute("r", (2 + Math.abs(Math.sin(mc.holdT * Math.PI * 3)) * 0.9).toFixed(2));
-      const gs = sim.segs.find((g) => g.type === "shot" && g.ev && g.ev.type === "goal" && g.ev.m === mc.holding.m && g.ev.side === mc.holding.side);
-      if (gs) { sim.ballEl.setAttribute("cx", gs.to.x.toFixed(2)); sim.ballEl.setAttribute("cy", gs.to.y.toFixed(2)); }
-      return;
-    }
-
-    const holder = seg && seg.c >= 0 ? sim.dots[seg.c] : null;
-    // ballon : au pied du porteur, ou en vol vers le receveur / la cible du tir
-    let bx, by;
-    if (seg.type === "hold" && holder) {
-      const vn = Math.hypot(holder.vx || 0, holder.vy || 0);
-      if (vn > 0.02) { bx = holder.x + (holder.vx / vn) * 1.2; by = holder.y + (holder.vy / vn) * 1.2; }
-      else { bx = holder.x + (holder.side === "a" ? 1 : -1); by = holder.y; }
-    }
-    else {
-      const u0 = clampV((mf - seg.t0) / (seg.t1 - seg.t0 || 0.01), 0, 1);
-      // inertie : le ballon part vite (frappé) puis freine (frottement)
-      const u = seg.type === "shot" ? 1 - Math.pow(1 - u0, 1.45) : 1 - Math.pow(1 - u0, 1.85);
-      const tx = seg.type === "pass" && holder && !seg.fin ? holder.x : seg.to.x;
-      const ty = seg.type === "pass" && holder && !seg.fin ? holder.y : seg.to.y;
-      bx = seg.from.x + (tx - seg.from.x) * u;
-      by = seg.from.y + (ty - seg.from.y) * u;
-    }
-
-    // pressing : le défenseur le plus proche du ballon vient au duel
-    const possSide = holder ? holder.side : "a";
-    const defSide = possSide === "a" ? "b" : "a";
-    let presser = null, best = 1e9;
-    for (const d of sim.dots) {
-      if (d.side !== defSide || d.pos === "GK") continue;
-      const q = Math.hypot(d.x - bx, d.y - by);
-      if (q < best) { best = q; presser = d; }
-    }
-    // hystérésis : on garde le même presseur tant qu'il reste raisonnablement proche
-    const prev = sim.dots[sim.presserIdx];
-    if (prev && prev.side === defSide && prev.pos !== "GK" && Math.hypot(prev.x - bx, prev.y - by) < best * 1.45) presser = prev;
-    sim.presserIdx = presser ? presser.idx : -1;
-    // soutiens : les 2 coéquipiers les plus proches proposent une solution
-    let sup1 = null, sup2 = null;
-    if (holder && seg.type === "hold") {
-      const mates = sim.dots.filter((d) => d.side === holder.side && d !== holder && d.pos !== "GK")
-        .sort((u, v) => Math.hypot(u.x - holder.x, u.y - holder.y) - Math.hypot(v.x - holder.x, v.y - holder.y));
-      sup1 = mates[0] || null; sup2 = mates[1] || null;
-    }
-    // anticipation : le futur receveur part déjà vers son point de chute
-    const nextSeg = sim.segs[sim.segIdx + 1];
-    const anticip = seg.type === "hold" && nextSeg && nextSeg.type === "pass" ? sim.dots[nextSeg.c] : null;
-
-    // coulissement des blocs : les DEUX équipes suivent le ballon en x
-    const slideX = clampV((bx - 50) * 0.45, -17, 17);
-    for (const d of sim.dots) {
-      const shiftK = d.pos === "MID" ? 0.22 : d.pos === "FWD" ? 0.20 : 0.15;
-      // l'équipe en possession pousse son bloc vers l'avant, l'autre se replie
-      const dirD = d.side === "a" ? 1 : -1;
-      const push = d.side === possSide ? 4.5 : -6.5;
-      let tx = clampV(d.home.x + slideX + dirD * push + clampV((bx - d.home.x) * shiftK, -9, 9) * 0.5, 3, 97);
-      let ty = d.home.y + clampV((by - d.home.y) * (shiftK + 0.05), -9, 9);
-      let sp = 4.5; // replacement
-      if (d.pos === "GK") {
-        tx = d.home.x; ty = clampV(32 + (by - 32) * 0.25, 25, 39); sp = 5;
-        if (seg.type === "shot" && seg.ev && d.side !== seg.ev.side) { ty = clampV(seg.to.y, 25.5, 38.5); sp = 16; }
-      } else if (seg.type === "hold" && d === holder) { tx = seg.to.x; ty = seg.to.y; sp = 6; }
-      else if (seg.type === "pass" && d === holder) { tx = seg.to.x; ty = seg.to.y; sp = seg.fin ? 16 : 11; }
-      else if (d === presser) { tx = bx + (d.x - bx) * 0.1; ty = by + (d.y - by) * 0.1; sp = 9; }
-      else if (d === anticip) { tx = nextSeg.to.x; ty = nextSeg.to.y; sp = 6.5; }
-      else if (d === sup1 || d === sup2) {
-        const dir = holder.side === "a" ? 1 : -1;
-        tx = clampV(holder.x + dir * (d === sup1 ? 9 : -5), 3, 97);
-        ty = clampV(holder.y + (d === sup1 ? -7 : 7), 4, 60);
-        sp = 6;
-      } else if (holder && d.side === possSide && d.pos === "FWD" && ((possSide === "a" && bx > 62) || (possSide === "b" && bx < 38))) {
-        // les attaquants plongent vers la surface quand le ballon approche
-        tx = clampV(d.home.x + slideX * 0.6 + (possSide === "a" ? 14 : -14), 3, 97);
-        ty = d.home.y + (32 - d.home.y) * 0.25;
-        sp = 5.5;
-      }
-      // micro-flottement (à l'arrêt, personne n'est une statue)
-      tx += Math.sin((now / 1000) * d.w1 + d.ph1) * 0.9;
-      ty += Math.cos((now / 1000) * d.w2 + d.ph2) * 0.8;
-      const dx = tx - d.x, dy = ty - d.y, dist = Math.hypot(dx, dy) || 0.0001;
-      const step = Math.min(dist, sp * dt);
-      d.vx = (dx / dist) * step; d.vy = (dy / dist) * step;
-      d.x = clampV(d.x + d.vx, 2.5, 97.5);
-      d.y = clampV(d.y + d.vy, 3, 61);
-      if (d.el.getAttribute("r") !== "2") d.el.setAttribute("r", "2");
-      d.el.setAttribute("cx", d.x.toFixed(2));
-      d.el.setAttribute("cy", d.y.toFixed(2));
-    }
-    sim.ballEl.setAttribute("cx", clampV(bx, 0.5, 99.5).toFixed(2));
-    sim.ballEl.setAttribute("cy", clampV(by, 2, 62).toFixed(2));
-  }
-
-  // Scène de penalty pendant la fenêtre interactive : tout le monde se place
-  // (tireur au point, gardien sur sa ligne, les 20 autres à l'entrée de la
-  // surface), suspense tant que les choix ne sont pas faits, puis élan, tir
-  // vers le côté choisi, plongeon du gardien et joie/dépit — le son et le
-  // panneau ne révèlent l'issue qu'à l'arrivée du ballon (sim.penDone).
-  function penScene(sim, mc, now, dt) {
-    const ev = mc.holding;
-    const right = ev.side === "a", dir = right ? 1 : -1;
-    const spot = { x: right ? 90 : 10, y: 32 };
-    const key = ev.m + "|" + ev.side;
-    if (sim.penKey !== key) { sim.penKey = key; sim.penT0 = 0; sim.penDone = false; }
-    const kicker = sim.dots.find((d) => d.side === ev.side && d.name === ev.scorer)
-      || sim.dots.find((d) => d.side === ev.side && d.pos === "FWD")
-      || sim.dots.find((d) => d.side === ev.side && d.pos !== "GK");
-    const gk = sim.dots.find((d) => d.side !== ev.side && d.pos === "GK");
-
-    let ball = { x: spot.x, y: spot.y };
-    let kickTo = { x: spot.x - dir * 5, y: spot.y + 0.6 }, kickSp = 9;
-    let gkTo = { x: right ? 96.9 : 3.1, y: 32 + Math.sin(now / 260) * 1.5 }, gkSp = 4.5;
-    const resolved = !ev.pending && ev.type !== "pen";
-    if (resolved) {
-      if (!sim.penT0) sim.penT0 = now;
-      const tt = (now - sim.penT0) / 1000;
-      const lp = sim.lp || {};
-      const yOf = (c) => (c === "L" ? 27.2 : c === "R" ? 36.8 : 32);
-      const dirC = lp.dir || (ev.type === "off" ? "R" : "C");
-      const diveC = lp.dive || (ev.type === "saved" ? dirC : (dirC === "L" ? "R" : "L"));
-      let end;
-      if (ev.type === "goal") end = { x: right ? 99.2 : 0.8, y: yOf(dirC) };
-      else if (ev.type === "saved") end = { x: right ? 96.6 : 3.4, y: yOf(dirC) };
-      else end = { x: right ? 99.7 : 0.3, y: dirC === "L" ? 19.5 : 44.5 };
-      const RUN = 1.0, FLY = 0.45; // secondes réelles : élan, puis vol du ballon
-      if (tt < RUN) { kickTo = { x: spot.x - dir * (5 - 4 * (tt / RUN)), y: spot.y }; kickSp = 11; }
-      else {
-        kickTo = { x: spot.x - dir * 1.4, y: spot.y }; kickSp = 8;
-        const u = clampV((tt - RUN) / FLY, 0, 1);
-        const uu = 1 - Math.pow(1 - u, 1.5);
-        ball = { x: spot.x + (end.x - spot.x) * uu, y: spot.y + (end.y - spot.y) * uu };
-        gkTo = { x: right ? 96.9 : 3.1, y: yOf(diveC) }; gkSp = 15;
-        if (u >= 1) {
-          if (!sim.penDone) {
-            sim.penDone = true;
-            if (ev.type === "goal") { SND.goal(); vibe(160); } else { SND.ooh(); vibe(70); }
-          }
-          if (ev.type === "saved") { ball = end; gkTo.y = end.y; }
-          if (ev.type === "goal") { kickTo = { x: clampV(spot.x - dir * 16, 4, 96), y: 13 }; kickSp = 11; }
-        }
-      }
-      if (sim.penDone && ev.type === "goal" && kicker && kicker.el)
-        kicker.el.setAttribute("r", (2 + Math.abs(Math.sin(tt * 6)) * 0.8).toFixed(2));
-    }
-
-    const edgeX = right ? 81.5 : 18.5; // entrée de la surface
-    const others = sim.dots.filter((d) => d !== kicker && d !== gk && d.pos !== "GK")
-      .sort((u, v) => u.home.y - v.home.y);
-    const n = Math.max(1, others.length - 1);
-    for (const d of sim.dots) {
-      let tx, ty, sp = 5;
-      if (d === kicker) { tx = kickTo.x; ty = kickTo.y; sp = kickSp; }
-      else if (d === gk) { tx = gkTo.x; ty = gkTo.y; sp = gkSp; }
-      else if (d.pos === "GK") { tx = d.home.x; ty = d.home.y; sp = 4; } // l'autre gardien reste chez lui
-      else {
-        const i = others.indexOf(d);
-        tx = edgeX + (d.side === ev.side ? -dir * 2.6 : 0) + ((i % 3) - 1) * 1.1;
-        ty = 7 + (i / n) * 50;
-        sp = 9; // tout le monde rejoint vite l'entrée de la surface
-      }
-      tx += Math.sin((now / 1000) * d.w1 + d.ph1) * 0.5;
-      ty += Math.cos((now / 1000) * d.w2 + d.ph2) * 0.5;
-      const dx = tx - d.x, dy = ty - d.y, dist = Math.hypot(dx, dy) || 0.0001;
-      const step = Math.min(dist, sp * dt);
-      d.x = clampV(d.x + (dx / dist) * step, 2.5, 97.5);
-      d.y = clampV(d.y + (dy / dist) * step, 3, 61);
-      if (!(sim.penDone && d === kicker) && d.el.getAttribute("r") !== "2") d.el.setAttribute("r", "2");
-      d.el.setAttribute("cx", d.x.toFixed(2));
-      d.el.setAttribute("cy", d.y.toFixed(2));
-    }
-    sim.ballEl.setAttribute("cx", clampV(ball.x, 0.5, 99.5).toFixed(2));
-    sim.ballEl.setAttribute("cy", clampV(ball.y, 2, 62).toFixed(2));
+    return SIM.mount($("live-stage"), {
+      a: A, b: B, events: match.events || [], dur: match.dur || 90,
+      seed: ((match.a * 73856093) ^ (match.b * 19349663)) >>> 0,
+      penLive: (p.penHoldMs || 0) > 0,
+      linesSvg: fmLinesSvg(),
+      prev: state.sim && state.sim.dots,
+      // révélation du penalty : le son part quand le ballon arrive
+      onPenReveal: (type) => { if (type === "goal") { SND.goal(); vibe(160); } else { SND.ooh(); vibe(70); } },
+    });
   }
 
   // Homme du match : meilleur buteur, sinon gardien décisif, sinon plus remuant.
@@ -1169,7 +838,7 @@
   }
 
   function drawLive(p, featured, isLocal) {
-    const elapsed = Date.now() - p.startedAt;
+    const elapsed = liveElapsed(p);
     const hold = p.goalHoldMs || 3500;
     const endOf = (m) => (p.clockMs * (m.dur || 90)) / 90 + frzOf(m, p).reduce((t, f) => t + f.len, 0);
     const anyShootout = p.matches.some((m) => m.shootout && !m.shootout.done);
@@ -1240,7 +909,7 @@
         }
       } else if (ovEl) { ovEl.remove(); }
 
-      const amb = (state.sim && state.sim.ambient ? state.sim.ambient : []).filter((c) => c.m <= mc.minute);
+      const amb = (state.ambient || []).filter((c) => c.m <= mc.minute);
       const lines = seen.map((e) => ({ m: e.m, cls: e.type === "goal" ? "goal" : "", text: e.text }))
         .concat(amb.map((c) => ({ m: c.m, cls: "amb", text: c.text })));
       if (mc.ft) {
@@ -1300,7 +969,7 @@
     const lp = featured && featured.livePen;
     const so = featured && featured.shootout;
     if (lp) {
-      const secs = Math.max(0, Math.ceil((lp.deadline - Date.now()) / 1000));
+      const secs = Math.max(0, Math.ceil((lp.deadline - srvNow()) / 1000));
       const iKick = (lp.side === "a" ? featured.a : featured.b) === state.pid;
       const iDive = (lp.side === "a" ? featured.b : featured.a) === state.pid;
       const pickedKey = "lp:" + featured.a + ":" + featured.b + ":" + lp.m + ":" + state.pid;
@@ -1330,7 +999,7 @@
       }
     } else if (so) {
       // Séance de tirs au but : panneau interactif
-      const secs = Math.max(0, Math.ceil((so.deadline - Date.now()) / 1000));
+      const secs = Math.max(0, Math.ceil((so.deadline - srvNow()) / 1000));
       const iKick = featured && ((so.kicker && so.kicker.side === "a" ? featured.a : featured.b) === state.pid);
       const iDive = featured && ((so.kicker && so.kicker.side === "a" ? featured.b : featured.a) === state.pid);
       const row = (side) => so.kicks.filter((k) => k.side === side).map((k) => k.scored ? "🟢" : "🔴").join(" ") || "—";
@@ -1571,7 +1240,7 @@
   function startTimer(deadline) {
     clearInterval(timerInterval);
     const el = $("draft-timer");
-    const tick = () => { const rem = Math.max(0, Math.ceil((deadline - Date.now()) / 1000)); el.textContent = rem; el.classList.toggle("warn", rem <= 10); };
+    const tick = () => { const rem = Math.max(0, Math.ceil((deadline - srvNow()) / 1000)); el.textContent = rem; el.classList.toggle("warn", rem <= 10); };
     tick(); timerInterval = setInterval(tick, 250);
   }
 

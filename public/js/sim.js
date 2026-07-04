@@ -333,19 +333,29 @@
           kicker.el.setAttribute("r", (2 + Math.abs(Math.sin(tt * 6)) * 0.8).toFixed(2));
       }
 
-      const edgeX = right ? 81.5 : 18.5; // tout le monde à l'entrée de la surface
-      const others = st.dots.filter((d) => d !== kicker && d !== gk && d.pos !== "GK")
-        .sort((u, v) => u.hy - v.hy);
-      const n = Math.max(1, others.length - 1);
+      // Placement réaliste : la foule épouse l'entrée de la surface (ligne des
+      // 16 mètres + arc de cercle), pendant que quelques joueurs restent en
+      // couverture vers le rond central (défenseurs du tireur, contres).
+      const edge = right ? 84.6 : 15.4;
+      const others = st.dots.filter((d) => d !== kicker && d !== gk && d.pos !== "GK");
+      const guards = others.filter((d) => d.side === ev.side && d.pos === "DEF").slice(0, 3)
+        .concat(others.filter((d) => d.side !== ev.side && d.pos === "FWD").slice(0, 2));
+      const crowd = others.filter((d) => guards.indexOf(d) < 0).sort((u, v) => u.hy - v.hy);
+      const nC = Math.max(1, crowd.length - 1);
       for (const d of st.dots) {
         if (!(st.penDone && d === kicker)) resetR(d);
         if (d === kicker) step(d, kickTo.x, kickTo.y, kickSp, dt, now, 0.25);
         else if (d === gk) step(d, gkTo.x, gkTo.y, gkSp, dt, now, 0.2);
         else if (d.pos === "GK") step(d, d.hx, d.hy, 4, dt, now, 0.4); // l'autre gardien reste chez lui
-        else {
-          const i = others.indexOf(d);
-          const tx = edgeX + (d.side === ev.side ? -dir * 2.6 : 0) + ((i % 3) - 1) * 1.1;
-          step(d, tx, 7 + (i / n) * 50, 9, dt, now, 0.4);
+        else if (guards.indexOf(d) >= 0) {
+          const gi = guards.indexOf(d);
+          step(d, 50 + dir * (8 + gi * 4), 20 + gi * 6 + (d.ph1 - 3.1) * 1.2, 8, dt, now, 0.5);
+        } else {
+          const i = crowd.indexOf(d);
+          const ty = 15 + (i / nC) * 34 + (d.ph2 - 3.1) * 0.5;
+          // bosse de l'arc de réparation au centre, double rang léger
+          const bulge = 3.4 * Math.exp(-Math.pow((ty - 32) / 7, 2)) + (d.idx % 2) * 1.7;
+          step(d, edge - dir * bulge + (d.ph1 - 3.1) * 0.25, ty, 11, dt, now, 0.35);
         }
       }
       setBall(ball.x, ball.y);
@@ -404,7 +414,8 @@
       for (const d of st.dots) {
         const shiftK = d.pos === "MID" ? 0.22 : d.pos === "FWD" ? 0.20 : 0.15;
         const dirD = d.side === "a" ? 1 : -1;
-        const push = d.side === poss ? 4.5 : -6.5;
+        // les défenseurs reculent moins : la ligne ne se colle pas au but
+        const push = (d.side === poss ? 4.5 : -6.5) * (d.pos === "DEF" ? 0.55 : 1);
         let tx = clamp(d.hx + slideX + dirD * push + clamp((tb.x - d.hx) * shiftK, -9, 9) * 0.5, 3, 97);
         let ty = d.hy + clamp((tb.y - d.hy) * (shiftK + 0.05), -9, 9);
         let sp = 4.5;

@@ -394,6 +394,14 @@
         }
         if (s2.mode === "shot") break;
       }
+      // anticipation d'occasion : si une frappe arrive bientôt, les attaquants
+      // du camp concerné plongent vers la surface adverse sans attendre le ballon
+      let nextShot = null, shotSide = null;
+      for (let j = st.segIdx; j < st.segs.length; j++) {
+        const s2 = st.segs[j];
+        if (s2.t0 - tf > 8) break;
+        if (s2.mode === "shot") { nextShot = s2; shotSide = s2.x1 > 50 ? "a" : "b"; break; }
+      }
       // pressing : le défenseur le plus proche vient au duel (avec hystérésis)
       const defSide = poss === "a" ? "b" : "a";
       let presser = null, best = 1e9;
@@ -451,17 +459,29 @@
             const lineX = clamp(mean + slideX * 0.65 + dirD * push,
               d.side === "a" ? 6 : 52, d.side === "a" ? 48 : 94);
             tx = lineX + (d.hx - mean) * 0.4;
-          } else if (d.pos === "FWD" && d.side === poss
-            && ((poss === "a" && tb.x > 62) || (poss === "b" && tb.x < 38))) {
-            // appel dans la surface quand le ballon approche
-            tx = clamp(d.hx + slideX * 0.6 + (poss === "a" ? 14 : -14), 3, 97);
-            ty = d.hy + (32 - d.hy) * 0.25;
+          } else if (d.pos === "FWD"
+            && ((d.side === shotSide && nextShot)
+              || (d.side === poss && ((poss === "a" && tb.x > 62) || (poss === "b" && tb.x < 38))))) {
+            // appel dans la surface : l'attaquant plonge vers le point de tir
+            // à venir (ou au niveau du ballon), dans son couloir, prêt à
+            // conclure — le hors-jeu le borne plus bas
+            const aimX = nextShot && d.side === shotSide ? nextShot.x0 : tb.x;
+            const aimY = nextShot && d.side === shotSide ? nextShot.y0 : tb.y;
+            const lane = d.hy < 24 ? -7 : d.hy > 40 ? 7 : 0;
+            tx = clamp(d.side === "a" ? Math.max(tb.x + 4, aimX - 2) : Math.min(tb.x - 4, aimX + 2), 3, 97);
+            ty = clamp(32 + lane + (aimY - 32) * 0.35, 4, 60);
+            sp = 9;
+          } else if (d.pos === "MID" && d.side === poss
+            && ((poss === "a" && tb.x > 58) || (poss === "b" && tb.x < 42))) {
+            // le milieu accompagne l'attaque jusqu'à l'entrée de la surface
+            const depth = poss === "a" ? tb.x - 50 : 50 - tb.x;
+            tx = clamp(d.hx + slideX + dirD * (3.5 + depth * 0.55), 3, 97);
             sp = 5.5;
           } else if (d.pos === "FWD" && d.side !== poss) {
             // l'attaquant qui subit ne redescend pas défendre dans sa surface
             tx = d.side === "a" ? Math.max(tx, 36) : Math.min(tx, 64);
           }
-          if (d.pos === "FWD" && d.side === poss) {
+          if (d.pos === "FWD" && (d.side === poss || (nextShot && d.side === shotSide))) {
             // discipline de hors-jeu : on reste au niveau du dernier défenseur
             // (sauf si le ballon a déjà cassé la ligne)
             if (d.side === "a") tx = Math.min(tx, Math.max(lineB + 0.4, tb.x));

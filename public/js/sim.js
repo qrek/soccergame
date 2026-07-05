@@ -82,14 +82,20 @@
 
     // Circulation : conduites + passes, librement (pertes de balle possibles)
     // ou orientée vers `aim` = {x, y, side} (montée vers une occasion).
+    // Le jeu suit un « couloir » (chan) qui change régulièrement : renversements
+    // d'une aile à l'autre, jeu par les côtés, pas seulement dans l'axe.
+    let chan = 32;
     function circulate(endT, aim) {
       while (t < endT - 0.03 && segs.length < 1800) {
         const oriented = aim && poss === aim.side;
+        // changement de couloir : on écarte vers une aile ou on recentre
+        if (rng() < 0.34) chan = rng() < 0.62 ? (rng() < 0.5 ? 8 + rng() * 10 : 46 + rng() * 10) : 24 + rng() * 16;
+        const lat = oriented ? (chan - ball.y) * 0.18 : (chan - ball.y) * 0.4;
         const adv = oriented
           ? { x: clamp(ball.x + (aim.x - ball.x) * 0.30 + (rng() - 0.5) * 4, 3, 97),
-              y: clamp(ball.y + (aim.y - ball.y) * 0.30 + (rng() - 0.5) * 4, 4, 60) }
+              y: clamp(ball.y + (aim.y - ball.y) * 0.30 + lat + (rng() - 0.5) * 4, 4, 60) }
           : { x: clamp(ball.x + dirOf(poss) * (2 + rng() * 5), 4, 96),
-              y: clamp(ball.y + (rng() - 0.5) * 7, 5, 59) };
+              y: clamp(ball.y + lat + (rng() - 0.5) * 7, 5, 59) };
         carry(adv, Math.min(endT - t, 0.5 + rng() * 1.1));
         if (t >= endT - 0.03) break;
         let rec;
@@ -98,14 +104,15 @@
           poss = poss === "a" ? "b" : "a";
           rec = rank(outfield(poss), ball)[0];
         } else {
-          const goalward = oriented ? aim : { x: clamp(ball.x + dirOf(poss) * 16, 4, 96), y: ball.y };
+          // on cherche un receveur dans le couloir visé (ailier sur un renversement)
+          const goalward = oriented ? aim : { x: clamp(ball.x + dirOf(poss) * 16, 4, 96), y: chan };
           const mates = outfield(poss).filter((d) => d !== holder);
           const ranked = rank(mates, goalward);
           rec = ranked[Math.floor(rng() * Math.min(3, ranked.length))] || holder;
         }
         const spot = {
           x: clamp((rec.hx + ball.x) / 2 + dirOf(poss) * 4 + (rng() - 0.5) * 6, 3, 97),
-          y: clamp((rec.hy + ball.y) / 2 + (rng() - 0.5) * 6, 4, 60),
+          y: clamp((rec.hy + ball.y) / 2 + (oriented ? 0 : (chan - ball.y) * 0.25) + (rng() - 0.5) * 6, 4, 60),
         };
         flyTo(rec, spot, 32, Math.max(0.2, endT - t));
       }

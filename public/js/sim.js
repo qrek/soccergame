@@ -432,14 +432,14 @@
       const meanB = defsB.reduce((s, d) => s + d.hx, 0) / (defsB.length || 1);
 
       // les blocs coulissent avec le ballon ; l'équipe en possession pousse
-      const slideX = clamp((tb.x - 50) * 0.45, -17, 17);
+      const slideX = clamp((tb.x - 50) * 0.55, -21, 21);
       for (const d of st.dots) {
-        const shiftK = d.pos === "MID" ? 0.22 : d.pos === "FWD" ? 0.20 : 0.15;
+        const shiftK = d.pos === "MID" ? 0.32 : d.pos === "FWD" ? 0.22 : 0.26;
         const dirD = d.side === "a" ? 1 : -1;
         const push = (d.side === poss ? 3.5 : -5) * (d.pos === "DEF" ? 0.55 : 1);
-        let tx = clamp(d.hx + slideX + dirD * push + clamp((tb.x - d.hx) * shiftK, -9, 9) * 0.5, 3, 97);
-        let ty = d.hy + clamp((tb.y - d.hy) * (shiftK + 0.05), -9, 9);
-        let sp = 4.5;
+        let tx = clamp(d.hx + slideX + dirD * push + clamp((tb.x - d.hx) * shiftK, -12, 12) * 0.5, 3, 97);
+        let ty = d.hy + clamp((tb.y - d.hy) * (shiftK + 0.12), -16, 16);
+        let sp = 5.2;
         if (d.pos === "GK") {
           tx = d.hx; ty = clamp(32 + (tb.y - 32) * 0.25, 25, 39); sp = 5;
           if (seg.mode === "shot" && d.side === defSide) { ty = clamp(seg.y1, 25.5, 38.5); sp = 16; } // il plonge
@@ -454,9 +454,14 @@
           sp = 6;
         } else {
           if (d.pos === "DEF") {
-            // ligne à plat : les défenseurs bougent ensemble, resserrés
+            // ligne à plat : les défenseurs bougent ensemble, resserrés, et la
+            // ligne SUIT le ballon (monte au rond central quand il s'éloigne,
+            // recule quand il approche) au lieu de rester ancrée à la surface
             const mean = d.side === "a" ? meanA : meanB;
-            const lineX = clamp(mean + slideX * 0.65 + dirD * push,
+            const follow = d.side === "a"
+              ? Math.max(mean + slideX * 0.85, tb.x - 27)
+              : Math.min(mean + slideX * 0.85, tb.x + 27);
+            const lineX = clamp(follow + dirD * push,
               d.side === "a" ? 6 : 52, d.side === "a" ? 48 : 94);
             tx = lineX + (d.hx - mean) * 0.4;
           } else if (d.pos === "FWD"

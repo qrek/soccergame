@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v33 — les attaquants plongent dans la surface";
+  const APP_VERSION = "v34 — blocs qui coulissent";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };

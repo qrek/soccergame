@@ -445,7 +445,13 @@
         const dirD = d.side === "a" ? 1 : -1;
         const push = (d.side === poss ? 3.5 : -5) * (d.pos === "DEF" ? 0.55 : 1);
         let tx = clamp(d.hx + slideX + dirD * push + clamp((tb.x - d.hx) * shiftK, -12, 12) * 0.5, 3, 97);
-        let ty = d.hy + clamp((tb.y - d.hy) * (shiftK + 0.12), -16, 16);
+        // LARGEUR : l'équipe qui défend se resserre côté ballon, mais l'équipe
+        // en possession écarte le jeu — ses joueurs de couloir (ailiers,
+        // latéraux) tiennent la largeur près des lignes de touche.
+        const wide = d.hy < 20 || d.hy > 44;
+        const latK = d.side === poss ? (wide ? 0.05 : 0.16) : shiftK + 0.12;
+        let ty = d.hy + clamp((tb.y - d.hy) * latK, -16, 16);
+        if (d.side === poss && wide) ty = clamp(d.hy + (d.hy < 32 ? -3.5 : 3.5), 5, 59);
         let sp = 5.2;
         if (d.pos === "GK") {
           tx = d.hx; ty = clamp(32 + (tb.y - 32) * 0.25, 25, 39); sp = 5;
@@ -479,7 +485,7 @@
             // conclure — le hors-jeu le borne plus bas
             const aimX = nextShot && d.side === shotSide ? nextShot.x0 : tb.x;
             const aimY = nextShot && d.side === shotSide ? nextShot.y0 : tb.y;
-            const lane = d.hy < 24 ? -7 : d.hy > 40 ? 7 : 0;
+            const lane = d.hy < 24 ? -9 : d.hy > 40 ? 9 : 0;
             tx = clamp(d.side === "a" ? Math.max(tb.x + 4, aimX - 2) : Math.min(tb.x - 4, aimX + 2), 3, 97);
             ty = clamp(32 + lane + (aimY - 32) * 0.35, 4, 60);
             sp = 9;

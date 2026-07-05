@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v35 — jeu par les ailes";
+  const APP_VERSION = "v36 — largeur mieux occupée";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };

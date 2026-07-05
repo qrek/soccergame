@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v36 — largeur mieux occupée";
+  const APP_VERSION = "v37 — photos des joueurs et drapeaux";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -14,6 +14,14 @@
 
   const flag = (code) => (!code || code.length !== 2) ? "🏳️"
     : String.fromCodePoint(...[...code.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
+
+  // Drapeau image (net partout, contrairement à l'emoji) avec repli emoji
+  // si le CDN est injoignable. Taille en em : suit la police du contexte.
+  const flagHtml = (code, cls) => {
+    if (!code || code.length !== 2) return `<span class="${cls || "flag"}">🏳️</span>`;
+    return `<span class="${cls || "flag"} flagwrap"><img src="https://flagcdn.com/h40/${code.toLowerCase()}.png"`
+      + ` alt="${code}" loading="lazy" onerror="this.parentNode.textContent='${flag(code)}'"></span>`;
+  };
 
   const tierClass = (r) => r >= 91 ? "tier-elite" : r >= 84 ? "tier-gold" : r >= 79 ? "tier-silver" : "tier-bronze";
 
@@ -113,8 +121,9 @@
       <div class="fut-inner">
         <div class="fut-top">
           <div class="fut-rating"><span class="r">${pl.r}</span><span class="p">${pl.pos}</span></div>
-          <div class="fut-badges"><span class="flag">${flag(pl.code)}</span><span class="price">${fmtM(price)}</span></div>
+          <div class="fut-badges">${flagHtml(pl.code)}<span class="price">${fmtM(price)}</span></div>
         </div>
+        <div class="fut-face"><span class="ph"><img data-face="${esc(pl.n)}" data-country="${esc(pl.c)}" alt="" loading="lazy"></span></div>
         <div class="fut-name">${esc(pl.n)}</div>
         <div class="fut-sub">${esc(pl.c)} · ${esc(pl.d)}${opts.chemLink ? ` · <span class="linktag">🔗 ${opts.linkLabel || "lien"}</span>` : ""}</div>
         <div class="fut-stats">${statsHtml}</div>
@@ -1166,7 +1175,7 @@
     $("turn-text").innerHTML = isLocal
       ? `📱 Au tour de <b>${esc(d.currentName)}</b> — passe-lui le téléphone !`
       : (myTurn ? "🎯 <b>À toi de jouer</b> — choisis un joueur" : `Au tour de <b>${esc(d.currentName)}</b>…`);
-    $("team-flag").textContent = flag(d.team.code);
+    $("team-flag").innerHTML = flagHtml(d.team.code, "");
     $("draft-team-name").textContent = d.team.country;
 
     // Ordre de passage (tiré au sort au début) : les équipes en haut,
@@ -1258,7 +1267,7 @@
       const c = chem.perChem[idx];
       return `<div class="token" style="left:${slot.slot.x}%;top:${slot.slot.y}%">
         <span class="t-rating">${p.r}</span>
-        <span class="t-flag">${flag(p.code)}</span>
+        ${flagHtml(p.code, "t-flag")}
         <div class="jersey" data-id="${p.id}">${kitSvg(pl.kit)}</div>
         <span class="t-chem chem-${c}"></span>
         <span class="t-name">${esc(p.n.split(" ").slice(-1)[0])}</span>
@@ -1303,7 +1312,7 @@
         const bench = pl.squad.filter((x) => !placed.has(x));
         if (!bench.length) return "";
         return `<div class="bench-row">🪑 Banc : ${bench.map((b) =>
-          `${flag(b.code)} ${esc(b.n)}${b.susp ? ' <span class="fat-tag">🟥 susp.</span>' : (b.fat >= 2 ? ` <span class="fat-tag">😓 −${Math.min(6, (b.fat - 1) * 2)}</span>` : "")}`).join(" · ")}</div>`;
+          `${flagHtml(b.code)} ${esc(b.n)}${b.susp ? ' <span class="fat-tag">🟥 susp.</span>' : (b.fat >= 2 ? ` <span class="fat-tag">😓 −${Math.min(6, (b.fat - 1) * 2)}</span>` : "")}`).join(" · ")}</div>`;
       })()}
       <p class="hint">Alchimie : même pays ou même club à des postes proches. Les joueurs qui enchaînent perdent de la forme — le banc fait tourner.</p>`;
   }
@@ -1360,7 +1369,7 @@
         <tr><th>#</th><th style="text-align:left">Joueur</th><th style="text-align:left">Équipe</th><th>Buts</th></tr>
         ${t.scorers.map((sc, i) => `<tr class="${i === 0 ? "qualif" : ""}">
           <td class="rk">${i + 1}</td>
-          <td class="tname">${flag(sc.code)} ${esc(sc.n)}</td>
+          <td class="tname">${flagHtml(sc.code)} ${esc(sc.n)}</td>
           <td class="tname" style="color:var(--muted)">${esc(sc.team)}</td>
           <td class="pts">${sc.goals}</td></tr>`).join("")}
       </table>` : ""}
@@ -1390,7 +1399,7 @@
           <span class="sovr">${p.strength.overall}</span>
         </div>
         <div class="squad-players">${sorted.map((pl) => `<div class="sp" data-id="${pl.id}"><span class="spos">${pl.pos}</span>
-          <span class="spn">${flag(pl.code)} ${esc(pl.n)}${pl.susp ? " 🟥" : pl.fat >= 2 ? " 😓" : ""}</span><span class="spr">${pl.r}</span></div>`).join("")}
+          <span class="spn">${flagHtml(pl.code)} ${esc(pl.n)}${pl.susp ? " 🟥" : pl.fat >= 2 ? " 😓" : ""}</span><span class="spr">${pl.r}</span></div>`).join("")}
           ${!sorted.length ? '<p class="hint">Aucun joueur drafté pour l\'instant.</p>' : ""}</div>
       </div>`;
     }).join("");

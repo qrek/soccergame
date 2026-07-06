@@ -81,18 +81,30 @@
     }
   }
 
+  // Facepack local (modèle Football Manager) : les images déposées dans
+  // public/assets/faces/ et déclarées dans index.json passent AVANT Wikipédia.
+  // index.json : { "Nom exact du joueur": "fichier.png", ... }
+  let pack = {};
+  const packReady = fetch("assets/faces/index.json")
+    .then((r) => (r.ok ? r.json() : {}))
+    .catch(() => ({}))
+    .then((j) => { pack = j && typeof j === "object" ? j : {}; });
+
   function want(img) {
     if (img.dataset.faceDone) return;
     img.dataset.faceDone = "1";
     const name = img.dataset.face;
     if (!name) return;
-    if (STUB) { show(img, stubUrl(name)); return; }
-    const hit = mem[name] != null ? mem[name] : cacheGet(name);
-    if (hit === "x") return;
-    if (hit) { mem[name] = hit; show(img, hit); return; }
-    if (jobs[name]) jobs[name].els.push(img);
-    else jobs[name] = { c: img.dataset.country || "", els: [img] };
-    pump();
+    packReady.then(() => {
+      if (pack[name]) { show(img, "assets/faces/" + pack[name]); return; }
+      if (STUB) { show(img, stubUrl(name)); return; }
+      const hit = mem[name] != null ? mem[name] : cacheGet(name);
+      if (hit === "x") return;
+      if (hit) { mem[name] = hit; show(img, hit); return; }
+      if (jobs[name]) jobs[name].els.push(img);
+      else jobs[name] = { c: img.dataset.country || "", els: [img] };
+      pump();
+    });
   }
 
   function scan(rootEl) {

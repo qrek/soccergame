@@ -507,8 +507,12 @@
           }
         }
         resetR(d);
-        step(d, tx, ty, sp, dt, now);
+        if (st.snapNext) { // reprise après un survol : on colle sans glisser
+          d.x = clamp(tx, 2.5, 97.5); d.y = clamp(ty, 3, 61); d.vx = 0; d.vy = 0;
+          d.el.setAttribute("cx", d.x.toFixed(2)); d.el.setAttribute("cy", d.y.toFixed(2));
+        } else step(d, tx, ty, sp, dt, now);
       }
+      st.snapNext = false;
       // ballon : au pied du porteur pendant une conduite, sinon sur sa trajectoire
       if (holder && (seg.mode === "carry" || seg.mode === "dead")) {
         const vn = Math.hypot(holder.vx || 0, holder.vy || 0);
@@ -516,6 +520,10 @@
         else setBall(holder.x + (holder.side === "a" ? 1 : -1), holder.y);
       } else setBall(tb.x, tb.y);
     };
+
+    // Réaffiche le terrain après un survol : la prochaine frame place les 22
+    // directement à leur cible (pas de glissade depuis une position périmée).
+    st.resync = function () { st.snapNext = true; st.lastNow = 0; };
 
     return st;
   }

@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v40 — photos plein cadre + scraper";
+  const APP_VERSION = "v41 — survol/action façon FM Mobile (stats + ralenti)";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -637,6 +637,7 @@
   // Ne réécrit le DOM que si le contenu a changé (évite tout clignotement).
   function setHtml(el, html) { if (el && el.__html !== html) { el.__html = html; el.innerHTML = html; } }
   function setText(el, txt) { if (el && el.__txt !== txt) { el.__txt = txt; el.textContent = txt; } }
+  function setStyleW(el, pct) { if (el && el.__w !== pct) { el.__w = pct; el.style.width = pct + "%"; } }
 
   // Horloge d'un match : linéaire 0'->90', figée sur chaque gel (célébration
   // de but `hold` ms, fenêtre de penalty `penHold` ms).
@@ -656,6 +657,71 @@
   // Gels d'un match (p = snap.playing) : penHold serveur, 0 en mode local.
   const frzOf = (m, p) => ENGINE.freezesOf(m, p.goalHoldMs || 3500, p.penHoldMs || 0);
   const goalsOf = (m) => (m.events || []).filter((e) => e.type === "goal").sort((a, b) => a.m - b.m);
+
+  // ---- Réalisateur façon FM Mobile : le temps de match défile à vitesse
+  // VARIABLE. En « survol » il file vite (le terrain laisse place aux stats) ;
+  // autour de chaque frappe dangereuse (but, arrêt, poteau) les ~DIR_LEAD
+  // minutes de montée sont étirées au ralenti (mode « action ») pour qu'on
+  // voie l'occasion se construire puis se conclure, terrain à l'appui.
+  // Le budget temps réel TOTAL reste identique au match linéaire (+ gels de
+  // célébration) : tous les matchs d'une journée finissent donc ensemble et
+  // endOf()/ftAll ne changent pas. Le ralenti « vole » juste du temps au survol.
+  const DIR_LEAD = 4;    // minutes de montée montrées avant la frappe
+  const DIR_TAIL = 1.3;  // minutes montrées après une frappe non-but (rebond, relance)
+  const DIR_K = 10;      // l'action défile ~10× plus lentement que le survol
+  function buildDirector(featured, p) {
+    const dur = featured.dur || 90;
+    const budget = (p.clockMs * dur) / 90;
+    const freezes = frzOf(featured, p); // gels plein-arrêt (buts, penalties)
+    // fenêtres d'action autour des frappes dangereuses, fusionnées si proches
+    const shots = (featured.events || [])
+      .filter((e) => e.type === "goal" || e.type === "saved" || e.type === "post")
+      .slice().sort((a, b) => a.m - b.m);
+    const wins = [];
+    for (const e of shots) {
+      const a = Math.max(0, e.m - DIR_LEAD);
+      const b = Math.min(dur, e.type === "goal" ? e.m : e.m + DIR_TAIL);
+      const last = wins[wins.length - 1];
+      if (last && a <= last.m1) last.m1 = Math.max(last.m1, b);
+      else wins.push({ m0: a, m1: b });
+    }
+    const inWin = (x) => wins.some((w) => x > w.m0 && x <= w.m1);
+    let aMin = 0; for (const w of wins) aMin += w.m1 - w.m0;
+    const rS = budget / (aMin * DIR_K + (dur - aMin) || 1); // ms par minute en survol
+    const rA = rS * DIR_K;                                  // ms par minute en action
+    // points de coupe : bords de fenêtres + minutes de gel + 0 + dur
+    const cuts = new Set([0, dur]);
+    for (const w of wins) { cuts.add(w.m0); cuts.add(w.m1); }
+    for (const f of freezes) cuts.add(f.m);
+    const pts = Array.from(cuts).filter((x) => x >= 0 && x <= dur).sort((a, b) => a - b);
+    const freezeAt = (m) => freezes.find((f) => f.m === m);
+    const segs = []; let rt = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const f = i > 0 ? freezeAt(a) : null; // gel après la montée qui finit ici
+      if (f) { segs.push({ m0: a, m1: a, rt0: rt, len: f.len, freeze: true, ev: f.ev }); rt += f.len; }
+      const mode = inWin((a + b) / 2) ? "action" : "survol";
+      const len = (b - a) * (mode === "action" ? rA : rS);
+      segs.push({ m0: a, m1: b, rt0: rt, len, mode });
+      rt += len;
+    }
+    const fEnd = freezeAt(dur);
+    if (fEnd) { segs.push({ m0: dur, m1: dur, rt0: rt, len: fEnd.len, freeze: true, ev: fEnd.ev }); rt += fEnd.len; }
+    return { segs, total: rt, dur };
+  }
+  // Instant courant → { minute, minuteF, holding, holdT, ft, mode }.
+  function directorClock(elapsed, dir) {
+    for (const s of dir.segs) {
+      if (elapsed < s.rt0 + s.len) {
+        if (s.freeze) return { minute: Math.round(s.m0), minuteF: s.m0, holding: s.ev,
+          holdT: Math.max(0, Math.min(1, (elapsed - s.rt0) / (s.len || 1))), ft: false, mode: "action" };
+        const u = s.len > 0 ? (elapsed - s.rt0) / s.len : 1;
+        const mf = s.m0 + (s.m1 - s.m0) * u;
+        return { minute: Math.floor(mf), minuteF: mf, holding: null, holdT: 0, ft: false, mode: s.mode };
+      }
+    }
+    return { minute: Math.floor(dir.dur), minuteF: dir.dur, holding: null, holdT: 0, ft: true, mode: "survol" };
+  }
 
   // Horloge alignée sur le serveur : les téléphones ont souvent quelques
   // secondes (voire minutes) de décalage — sans correction, le direct peut
@@ -691,6 +757,8 @@
       state.ambient = featured
         ? buildAmbient(featured, mulberry(((featured.a * 2654435761) ^ (featured.b * 40503)) >>> 0)) : [];
       state.sim = featured ? mountSim(featured, p) : null;
+      state.director = featured ? buildDirector(featured, p) : null;
+      state.simMode = null; // force la 1re bascule de vue
     }
 
     clearInterval(liveInterval);
@@ -703,7 +771,10 @@
     if (featured && state.sim) {
       const loop = () => {
         if (!state.snap || state.snap.phase !== "playing" || !state.sim) return;
-        state.sim.draw(matchClock(liveElapsed(p), frzOf(featured, p), p.clockMs, featured.dur), Date.now(), featured.livePen);
+        const dmc = state.director ? directorClock(liveElapsed(p), state.director)
+          : matchClock(liveElapsed(p), frzOf(featured, p), p.clockMs, featured.dur);
+        // en survol pur (stats à l'écran) inutile d'animer le terrain caché
+        if (dmc.mode !== "survol" || dmc.holding) state.sim.draw(dmc, Date.now(), featured.livePen);
         state.simRaf = requestAnimationFrame(loop);
       };
       state.simRaf = requestAnimationFrame(loop);
@@ -722,9 +793,32 @@
         </div>
         <div class="lc-cards"><span id="live-cards-a"></span><span id="live-cards-b"></span></div>
         <div class="lc-pens" id="live-pens" style="display:none"></div>`;
+      // Panneau de survol (stats + momentum) affiché quand le terrain se retire.
+      const ca = (kitOf(featured.a) || {}).p || "#3a86ff";
+      let cb = (kitOf(featured.b) || {}).p || "#e5484d";
+      if (ca.toLowerCase() === cb.toLowerCase()) cb = "#e5484d";
+      $("live-stats").style.setProperty("--ca", ca);
+      $("live-stats").style.setProperty("--cb", cb);
+      $("live-stats").innerHTML = `
+        <div class="ls-phase" id="ls-phase">⏱ 0' — survol</div>
+        <div class="ls-poss">
+          <span class="ls-num" id="ls-poss-a">50%</span>
+          <div class="ls-bar"><i id="ls-poss-bar" style="width:50%"></i></div>
+          <span class="ls-num" id="ls-poss-b">50%</span>
+        </div>
+        <div class="ls-cap">Possession</div>
+        <div class="ls-rows">
+          <div class="ls-row"><b id="ls-sh-a">0</b><span>Tirs</span><b id="ls-sh-b">0</b></div>
+          <div class="ls-row"><b id="ls-on-a">0</b><span>Cadrés</span><b id="ls-on-b">0</b></div>
+        </div>
+        <div class="ls-cap">Momentum</div>
+        <div class="ls-mom"><i id="ls-mom-bar"></i></div>
+        <div class="ls-hot" id="ls-hot"></div>`;
+      $("live-stats").__html = undefined;
     } else {
       $("live-card").innerHTML = `<div class="lc-stage">${esc(p.stage)} · MULTIPLEX <span class="live-min" id="live-min">0'</span></div>`;
       $("live-stage").innerHTML = "";
+      $("live-stats").innerHTML = "";
     }
     $("live-summary").innerHTML = '<div class="live-feed" id="live-feed"></div><p class="hint" id="live-hint"></p>';
     $("live-prev").innerHTML = "";
@@ -854,7 +948,8 @@
     const ftAll = !anyShootout && p.matches.every((m) => elapsed >= endOf(m));
 
     if (featured) {
-      const mc = matchClock(elapsed, frzOf(featured, p), p.clockMs, featured.dur);
+      const mc = state.director ? directorClock(elapsed, state.director)
+        : matchClock(elapsed, frzOf(featured, p), p.clockMs, featured.dur);
       // Ambiance : sifflet d'engagement, clameur sur but (+ vibration),
       // "ooh" sur occasion, triple sifflet au coup de sifflet final.
       const snd = state.snd || (state.snd = {});
@@ -888,6 +983,38 @@
       };
       setText($("live-cards-a"), cardsOf("a"));
       setText($("live-cards-b"), cardsOf("b"));
+
+      // ---- Bascule terrain <-> survol (stats + momentum) façon FM Mobile ----
+      const showPitch = mc.mode === "action" || !!mc.holding || mc.ft;
+      const view = $("live-view");
+      if (view) view.classList.toggle("stats-on", !showPitch);
+      if (state.simMode !== showPitch) {
+        state.simMode = showPitch;
+        // à la reprise du terrain, on recolle les 22 à leur position cible
+        if (showPitch && state.sim && state.sim.resync) state.sim.resync();
+      }
+      if (!showPitch) {
+        // stats estimées à la minute courante (mêmes règles que la feuille de match)
+        let sha = 0, shb = 0, ona = 0, onb = 0, mom = 0;
+        for (const e of (featured.events || [])) {
+          if (e.m > mc.minute || e.pending) continue;
+          const on = e.type === "goal" || e.type === "saved";
+          if (!on && e.type !== "post" && e.type !== "off") continue;
+          if (e.side === "a") { sha++; if (on) ona++; } else { shb++; if (on) onb++; }
+          const age = mc.minute - e.m; // momentum : pression des ~16 dernières minutes
+          if (age <= 16) mom += (e.side === "a" ? 1 : -1) * (e.type === "goal" ? 3 : on ? 2 : 1) * (1 - age / 16);
+        }
+        const possA = Math.round(Math.max(28, Math.min(72, 50 + (sha - shb) * 4)));
+        const momPct = Math.max(6, Math.min(94, 50 + mom * 11));
+        setText($("ls-phase"), `⏱ ${mc.minute}' — le jeu se dispute`);
+        setText($("ls-poss-a"), possA + "%"); setText($("ls-poss-b"), (100 - possA) + "%");
+        setStyleW($("ls-poss-bar"), possA);
+        setText($("ls-sh-a"), String(sha)); setText($("ls-sh-b"), String(shb));
+        setText($("ls-on-a"), String(ona)); setText($("ls-on-b"), String(onb));
+        const bar = $("ls-mom-bar"); if (bar && bar.__l !== momPct) { bar.__l = momPct; bar.style.left = momPct + "%"; }
+        const hot = Math.abs(mom) > 1.6 ? `⚡ ${esc(mom > 0 ? featured.an : featured.bn)} pousse` : "";
+        setText($("ls-hot"), hot);
+      }
       const pensEl = $("live-pens");
       if (mc.ft && featured.pens) { pensEl.style.display = ""; setText(pensEl, `Tirs au but : ${featured.pens.pa} - ${featured.pens.pb}`); }
 

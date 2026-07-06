@@ -9,19 +9,54 @@
 })(typeof window !== "undefined" ? window : this, function (MODEL) {
   "use strict";
 
-  // Force d'une équipe : attaque et défense pondérées par poste.
+  // Stats détaillées (façon FIFA) d'un joueur, mises en cache (déterministes).
+  function statsMap(p) {
+    if (p._sm) return p._sm;
+    const m = {};
+    for (const s of MODEL.computeStats(p)) m[s.label] = s.value;
+    return (p._sm = m);
+  }
+  const statOf = (p, lab) => { const m = statsMap(p); return m[lab] != null ? m[lab] : p.r; };
+
+  // Force d'une équipe, construite sur les STATS DÉTAILLÉES (plus seulement la
+  // note) : deux joueurs de même note ne se valent donc plus.
+  //   attaque = finition + dribble + vitesse des attaquants, création du milieu
+  //   défense = placement + physique des défenseurs, réflexes du gardien
+  // On expose aussi la vitesse des lignes (matchup attaque/défense).
   function teamStrength(players) {
-    if (!players.length) return { overall: 0, atk: 0, def: 0 };
+    if (!players.length) return { overall: 0, atk: 0, def: 0, atkPace: 60, defPace: 60, creat: 60 };
     const avg = (arr) => (arr.length ? arr.reduce((s, p) => s + p.r, 0) / arr.length : 0);
+    const sAvg = (arr, lab, dflt) => (arr.length ? arr.reduce((s, p) => s + statOf(p, lab), 0) / arr.length : dflt);
     const gk = players.filter((p) => p.pos === "GK");
     const def = players.filter((p) => p.pos === "DEF");
     const mid = players.filter((p) => p.pos === "MID");
     const fwd = players.filter((p) => p.pos === "FWD");
     const overall = Math.round(avg(players));
-    const atk = Math.round(avg(fwd) * 0.55 + avg(mid) * 0.35 + overall * 0.10);
-    const dfn = Math.round(avg(gk) * 0.35 + avg(def) * 0.45 + avg(mid) * 0.20);
-    return { overall, atk, def: dfn };
+    // attaque : les attaquants finissent/percutent, le milieu crée
+    const fFin = fwd.length ? sAvg(fwd, "SHO") * 0.5 + sAvg(fwd, "DRI") * 0.3 + sAvg(fwd, "PAC") * 0.2 : overall;
+    const mCreat = mid.length ? sAvg(mid, "PAS") * 0.6 + sAvg(mid, "DRI") * 0.4 : overall;
+    const atkRaw = fFin * 0.6 + mCreat * 0.3 + overall * 0.1;
+    // défense : tacle/placement + physique derrière, réflexes du gardien
+    const dBack = def.length ? sAvg(def, "DEF") * 0.55 + sAvg(def, "PHY") * 0.45 : overall;
+    const dGk = gk.length ? sAvg(gk, "REF") * 0.5 + sAvg(gk, "DIV") * 0.3 + sAvg(gk, "POS") * 0.2 : overall;
+    const dMid = mid.length ? sAvg(mid, "DEF") * 0.6 + sAvg(mid, "PHY") * 0.4 : overall;
+    const defRaw = dGk * 0.34 + dBack * 0.46 + dMid * 0.20;
+    // Recentrage : atk et def gravitent autour de la note d'ensemble (leur
+    // moyenne = overall) ; on ne conserve que l'ÉCART attaque/défense PROPRE à
+    // l'équipe. LEAN neutralise le biais structurel (les stats offensives sont
+    // naturellement plus hautes) pour garder le niveau de buts d'avant.
+    const LEAN = 3.5;
+    const gap = (atkRaw - defRaw) - LEAN;
+    const atk = Math.round(overall + gap / 2);
+    const dfn = Math.round(overall - gap / 2);
+    const atkPace = Math.round(fwd.length ? sAvg(fwd, "PAC") : mid.length ? sAvg(mid, "PAC") : overall);
+    const defPace = Math.round(def.length ? sAvg(def, "PAC") : overall);
+    return { overall, atk, def: dfn, atkPace, defPace, creat: Math.round(mCreat) };
   }
+
+  // Attaque EFFECTIVE face à une défense : matchup de vitesse. Une attaque
+  // rapide contre une défense lente déborde (jusqu'à ±5 d'attaque effective).
+  const effAtk = (sOwn, sOpp) => sOwn.atk + Math.max(-5, Math.min(5, (sOwn.atkPace - sOpp.defPace) * 0.25));
 
   // Générateur pseudo-aléatoire déterministe (mulberry32).
   function makeRng(seed) {
@@ -56,7 +91,7 @@
     return pool[pool.length - 1];
   }
 
-  const shoOf = (p) => { const s = MODEL.computeStats(p).find((x) => x.label === "SHO"); return s ? s.value : p.r; };
+  const shoOf = (p) => statOf(p, "SHO");
 
   // Occasions d'une équipe : les buts + quelques tirs ratés/arrêtés.
   function teamChances(att, def, goals, side, defStrength, rng) {
@@ -147,8 +182,8 @@
     sa.atk += ba; sa.def += ba;
     sb.atk += bb; sb.def += bb;
     // /8 (au lieu de /12) : la qualité du draft pèse vraiment sur le résultat.
-    const lamA = Math.max(0.18, 1.32 * Math.pow(2, (sa.atk - sb.def) / 8));
-    const lamB = Math.max(0.18, 1.32 * Math.pow(2, (sb.atk - sa.def) / 8));
+    const lamA = Math.max(0.18, 1.32 * Math.pow(2, (effAtk(sa, sb) - sb.def) / 8));
+    const lamB = Math.max(0.18, 1.32 * Math.pow(2, (effAtk(sb, sa) - sa.def) / 8));
     const ga = Math.min(6, poisson(lamA, rng));
     const gb = Math.min(6, poisson(lamB, rng));
     // Cartons : les fautifs sont plutôt des défenseurs/milieux.
@@ -422,8 +457,8 @@
     const sa = teamStrength(m._ta.players), sb = teamStrength(m._tb.players);
     sa.atk += m._ta.bonus || 0; sb.atk += m._tb.bonus || 0;
     sa.def += m._ta.bonus || 0; sb.def += m._tb.bonus || 0;
-    const lamA = Math.max(0.05, 1.32 * Math.pow(2, (sa.atk - sb.def) / 8) * (30 / 90) * 0.85);
-    const lamB = Math.max(0.05, 1.32 * Math.pow(2, (sb.atk - sa.def) / 8) * (30 / 90) * 0.85);
+    const lamA = Math.max(0.05, 1.32 * Math.pow(2, (effAtk(sa, sb) - sb.def) / 8) * (30 / 90) * 0.85);
+    const lamB = Math.max(0.05, 1.32 * Math.pow(2, (effAtk(sb, sa) - sa.def) / 8) * (30 / 90) * 0.85);
     const ga = Math.min(2, poisson(lamA, rng)), gb = Math.min(2, poisson(lamB, rng));
     const evs = finalizeEvents(
       teamChances(m._ta, m._tb, ga, "a", sb, rng),
@@ -552,8 +587,8 @@
     const la = stanceLam(m.stanceA), lb = stanceLam(m.stanceB);
     const frac = Math.max(0, (90 - minute) / 90);
     const rng = makeRng(seedFor(m.a, m.b, m.salt) ^ Math.imul(minute + 1, 2654435761));
-    const lamA = Math.max(0.04, 1.32 * Math.pow(2, (sa.atk - sb.def) / 8) * la.own * lb.opp * frac);
-    const lamB = Math.max(0.04, 1.32 * Math.pow(2, (sb.atk - sa.def) / 8) * lb.own * la.opp * frac);
+    const lamA = Math.max(0.04, 1.32 * Math.pow(2, (effAtk(sa, sb) - sb.def) / 8) * la.own * lb.opp * frac);
+    const lamB = Math.max(0.04, 1.32 * Math.pow(2, (effAtk(sb, sa) - sa.def) / 8) * lb.own * la.opp * frac);
     const gaN = Math.min(4, poisson(lamA, rng));
     const gbN = Math.min(4, poisson(lamB, rng));
     const newEvs = finalizeEvents(

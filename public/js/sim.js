@@ -533,6 +533,19 @@
             else tx = Math.max(tx, Math.min(lineA - 0.4, tb.x));
           }
         }
+        // steering — séparation : on s'écarte des voisins trop proches pour ne
+        // pas se superposer (ce qui donnait l'effet « paquet de dots »). On
+        // n'évite jamais le porteur (le pressing reste au contact).
+        if (d !== holder && d !== receiver && d !== presser && d.pos !== "GK") {
+          let sx = 0, sy = 0;
+          for (const o of st.dots) {
+            if (o === d || o === holder || o.pos === "GK") continue;
+            const ox = d.x - o.x, oy = d.y - o.y, q = ox * ox + oy * oy;
+            if (q > 0.01 && q < 20) { const dd = Math.sqrt(q), f = (4.5 - dd) / 4.5; if (f > 0) { sx += (ox / dd) * f; sy += (oy / dd) * f; } }
+          }
+          tx = clamp(tx + clamp(sx * 2.4, -3.5, 3.5), 2.5, 97.5);
+          ty = clamp(ty + clamp(sy * 2.4, -3.5, 3.5), 3, 61);
+        }
         resetR(d);
         if (st.snapNext) { // reprise après un survol : on colle sans glisser
           d.x = clamp(tx, 2.5, 97.5); d.y = clamp(ty, 3, 61); d.vx = 0; d.vy = 0;
@@ -540,6 +553,26 @@
         } else step(d, tx, ty, sp, dt, now);
       }
       st.snapNext = false;
+      // Résolution des chevauchements : deux joueurs ne se superposent jamais
+      // complètement. On ne corrige que 25 % de l'empiètement par frame (doux,
+      // sans tremblement) et le PORTEUR reste ancré (il tient le ballon).
+      const MINSEP = 3.3;
+      for (let i = 0; i < st.dots.length; i++) {
+        for (let j = i + 1; j < st.dots.length; j++) {
+          const a = st.dots[i], b = st.dots[j];
+          const dx = b.x - a.x, dy = b.y - a.y, q = dx * dx + dy * dy;
+          if (q < MINSEP * MINSEP && q > 0.0001) {
+            const dd = Math.sqrt(q), p = (MINSEP - dd) * 0.25, ux = dx / dd, uy = dy / dd;
+            if (a === holder) { b.x += ux * p * 2; b.y += uy * p * 2; }
+            else if (b === holder) { a.x -= ux * p * 2; a.y -= uy * p * 2; }
+            else { a.x -= ux * p; a.y -= uy * p; b.x += ux * p; b.y += uy * p; }
+          }
+        }
+      }
+      for (const d of st.dots) {
+        d.x = clamp(d.x, 2.5, 97.5); d.y = clamp(d.y, 3, 61);
+        d.el.setAttribute("cx", d.x.toFixed(2)); d.el.setAttribute("cy", d.y.toFixed(2));
+      }
       // ballon : au pied du porteur pendant une conduite, sinon sur sa trajectoire
       if (holder && (seg.mode === "carry" || seg.mode === "dead")) {
         const vn = Math.hypot(holder.vx || 0, holder.vy || 0);

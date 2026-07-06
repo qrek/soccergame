@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v38 — facepack local";
+  const APP_VERSION = "v39 — photo en fond de carte";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -116,6 +116,7 @@
     const price = pl.price != null ? pl.price : MODEL.marketValue(pl);
     const stateClass = pl.taken ? "taken" : pl.expensive ? "expensive" : opts.disabled ? "disabled" : "";
     return `<div class="fut ${tierClass(pl.r)} ${stateClass} ${opts.chemLink ? "linked" : ""}" data-id="${pl.id}">
+      <div class="fut-bg"><img data-face="${esc(pl.n)}" data-country="${esc(pl.c)}" alt="" loading="lazy"><i></i></div>
       ${pl.taken ? '<span class="taken-badge">PRIS</span>' : ""}
       ${pl.expensive ? '<span class="taken-badge expensive-badge">TROP CHER</span>' : ""}
       <div class="fut-inner">
@@ -123,7 +124,6 @@
           <div class="fut-rating"><span class="r">${pl.r}</span><span class="p">${pl.pos}</span></div>
           <div class="fut-badges">${flagHtml(pl.code)}<span class="price">${fmtM(price)}</span></div>
         </div>
-        <div class="fut-face"><span class="ph"><img data-face="${esc(pl.n)}" data-country="${esc(pl.c)}" alt="" loading="lazy"></span></div>
         <div class="fut-name">${esc(pl.n)}</div>
         <div class="fut-sub">${esc(pl.c)} · ${esc(pl.d)}${opts.chemLink ? ` · <span class="linktag">🔗 ${opts.linkLabel || "lien"}</span>` : ""}</div>
         <div class="fut-stats">${statsHtml}</div>

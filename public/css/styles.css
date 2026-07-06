@@ -149,16 +149,21 @@ body {
 .fut-badges .flagwrap img { height: 17px; display: block; }
 .token .flagwrap img { height: 11px; }
 
-/* Portrait du joueur (photo Wikipédia, silhouette en attendant/en secours) */
-.fut-face { flex: 1; display: grid; place-items: center; min-height: 0; padding: 3px 0 1px; }
-.fut-face .ph { width: 58px; height: 58px; border-radius: 50%; overflow: hidden; display: block; position: relative;
-  background: rgba(255,255,255,.07) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23a9b7c2' fill-opacity='.55'%3E%3Ccircle cx='12' cy='8.2' r='4'/%3E%3Cpath d='M4 21.5c0-4.4 3.6-7.5 8-7.5s8 3.1 8 7.5z'/%3E%3C/svg%3E") center 58%/62% no-repeat;
-  box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.2), 0 3px 10px rgba(0,0,0,.32); }
-.fut-face img { width: 100%; height: 100%; object-fit: cover; object-position: center top; opacity: 0; transition: opacity .3s; }
-.fut-face img.on { opacity: 1; }
+/* Photo du joueur en fond de carte (Wikipédia/facepack), très discrète,
+   sous un dégradé teinté à la couleur du palier pour garder la lisibilité */
+.fut-bg { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; }
+.fut-bg img { width: 100%; height: 100%; object-fit: cover; object-position: center 18%;
+  opacity: 0; transition: opacity .45s ease; filter: saturate(.85) contrast(1.05); }
+.fut-bg img.on { opacity: .34; }
+.fut-bg i { position: absolute; inset: 0; }
+.tier-elite  .fut-bg i { background: linear-gradient(180deg, rgba(46,168,216,.30) 0%, rgba(10,16,14,.30) 44%, rgba(8,13,11,.92) 86%); }
+.tier-gold   .fut-bg i { background: linear-gradient(180deg, rgba(185,138,30,.30) 0%, rgba(10,16,14,.30) 44%, rgba(8,13,11,.92) 86%); }
+.tier-silver .fut-bg i { background: linear-gradient(180deg, rgba(141,154,166,.28) 0%, rgba(10,16,14,.30) 44%, rgba(8,13,11,.92) 86%); }
+.tier-bronze .fut-bg i { background: linear-gradient(180deg, rgba(125,74,34,.32) 0%, rgba(10,16,14,.30) 44%, rgba(8,13,11,.92) 86%); }
 
-.fut-name { flex: 0 0 auto; display: grid; place-items: center; text-align: center; font-weight: 900; font-size: 15.5px;
-  text-transform: uppercase; letter-spacing: .5px; line-height: 1.25; padding: 3px 2px 0; }
+.fut-name { flex: 1; display: grid; place-items: center; text-align: center; font-weight: 900; font-size: 15.5px;
+  text-transform: uppercase; letter-spacing: .5px; line-height: 1.25; padding: 0 2px;
+  text-shadow: 0 1px 6px rgba(0,0,0,.65); }
 .fut-sub { text-align: center; font-size: 9.5px; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px; }
 .fut-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px 2px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,.09); }
 .fut-stats .cell { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }

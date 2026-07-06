@@ -80,41 +80,56 @@
       t = tt;
     };
 
-    // Circulation : conduites + passes, librement (pertes de balle possibles)
-    // ou orientée vers `aim` = {x, y, side} (montée vers une occasion).
-    // Le jeu suit un « couloir » (chan) qui change régulièrement : renversements
-    // d'une aile à l'autre, jeu par les côtés, pas seulement dans l'axe.
-    let chan = 32;
+    // Limites de jeu : le ballon reste franchement dans le terrain (fini la
+    // touche qui rebondit). Les frappes seules vont chercher la ligne de but.
+    const IN_X = (x) => clamp(x, 7, 93);
+    const IN_Y = (y) => clamp(y, 9, 55);
+
+    // Circulation réaliste : conduites courtes vers l'avant + passes
+    // PROGRESSIVES (on cherche un relais plus haut, à portée), avec quelques
+    // renversements et de rares pertes de balle en milieu de terrain.
+    // Orientée vers `aim = {x, y, side}` lors de la montée vers une occasion.
     function circulate(endT, aim) {
       while (t < endT - 0.03 && segs.length < 1800) {
+        const dir = dirOf(poss);
         const oriented = aim && poss === aim.side;
-        // changement de couloir : on écarte vers une aile ou on recentre
-        if (rng() < 0.34) chan = rng() < 0.62 ? (rng() < 0.5 ? 8 + rng() * 10 : 46 + rng() * 10) : 24 + rng() * 16;
-        const lat = oriented ? (chan - ball.y) * 0.18 : (chan - ball.y) * 0.4;
+        // conduite : vers l'objectif si orienté, sinon vers l'avant avec un
+        // léger jeu latéral pour chercher les intervalles
         const adv = oriented
-          ? { x: clamp(ball.x + (aim.x - ball.x) * 0.30 + (rng() - 0.5) * 4, 3, 97),
-              y: clamp(ball.y + (aim.y - ball.y) * 0.30 + lat + (rng() - 0.5) * 4, 4, 60) }
-          : { x: clamp(ball.x + dirOf(poss) * (2 + rng() * 5), 4, 96),
-              y: clamp(ball.y + lat + (rng() - 0.5) * 7, 5, 59) };
-        carry(adv, Math.min(endT - t, 0.5 + rng() * 1.1));
+          ? { x: ball.x + (aim.x - ball.x) * 0.30, y: ball.y + (aim.y - ball.y) * 0.30 }
+          : { x: ball.x + dir * (2.5 + rng() * 4), y: ball.y + (rng() - 0.5) * 5 };
+        carry({ x: IN_X(adv.x), y: IN_Y(adv.y) }, Math.min(endT - t, 0.45 + rng() * 0.8));
         if (t >= endT - 0.03) break;
-        let rec;
-        if (!aim && rng() < 0.18) {
-          // interception : la possession change de camp
+
+        // perte de balle : rare, seulement en jeu libre, récupérée par l'adversaire le plus proche
+        if (!aim && rng() < 0.07) {
           poss = poss === "a" ? "b" : "a";
-          rec = rank(outfield(poss), ball)[0];
-        } else {
-          // on cherche un receveur dans le couloir visé (ailier sur un renversement)
-          const goalward = oriented ? aim : { x: clamp(ball.x + dirOf(poss) * 16, 4, 96), y: chan };
-          const mates = outfield(poss).filter((d) => d !== holder);
-          const ranked = rank(mates, goalward);
-          rec = ranked[Math.floor(rng() * Math.min(3, ranked.length))] || holder;
+          holder = rank(outfield(poss), ball)[0];
+          continue;
         }
+
+        // choix du receveur
+        const mates = outfield(poss).filter((d) => d !== holder);
+        let rec;
+        if (oriented) {
+          rec = rank(mates, aim)[0] || holder; // le plus proche du point d'occasion
+        } else {
+          // score = progression vers le but − distance de passe − dérive latérale + aléa
+          let best = -1e9;
+          for (const d of mates) {
+            const forward = (d.hx - ball.x) * dir;
+            const range = Math.hypot(d.hx - ball.x, d.hy - ball.y);
+            const s = forward * 1.5 - Math.max(0, range - 24) * 1.2 - Math.abs(d.hy - ball.y) * 0.2 + rng() * 9;
+            if (s > best) { best = s; rec = d; }
+          }
+          rec = rec || holder;
+        }
+        // point de réception : dans les pieds du receveur, un cran devant, en jeu
         const spot = {
-          x: clamp((rec.hx + ball.x) / 2 + dirOf(poss) * 4 + (rng() - 0.5) * 6, 3, 97),
-          y: clamp((rec.hy + ball.y) / 2 + (oriented ? 0 : (chan - ball.y) * 0.25) + (rng() - 0.5) * 6, 4, 60),
+          x: IN_X(rec.hx * 0.65 + ball.x * 0.35 + dir * 3),
+          y: IN_Y(rec.hy * 0.65 + ball.y * 0.35),
         };
-        flyTo(rec, spot, 32, Math.max(0.2, endT - t));
+        flyTo(rec, spot, 34, Math.max(0.2, endT - t));
       }
     }
 
@@ -125,43 +140,51 @@
       const isPen = penLive && ev.pen;
       const LEAD = isPen ? 0 : 0.7;   // durée de vol de la frappe
       const arrive = ev.m - LEAD;     // le tireur doit avoir le ballon ici
-      const spot = { x: ev.x, y: ev.y };
-      const shooter = ev.shooter || rank(outfield(ev.side), spot)[0];
+      const right = ev.side === "a";
+      // point de frappe : dans le dernier tiers, face au but visé
+      const spot = { x: IN_X(right ? Math.max(ev.x, 70) : Math.min(ev.x, 30)), y: IN_Y(ev.y) };
+      // buteur : le VRAI (retrouvé par nom en amont), sinon un attaquant/milieu
+      // proche du point de frappe — jamais un défenseur au hasard
+      let shooter = ev.shooter;
+      if (!shooter) {
+        const att = outfield(ev.side).filter((d) => d.pos === "FWD" || d.pos === "MID");
+        shooter = rank(att.length ? att : outfield(ev.side), spot)[0];
+      }
       ev.shooter = shooter;
       if (arrive - 0.9 < t) trimTo(Math.max(0.1, arrive - 0.9));
       // jeu libre, puis montée de l'équipe qui va se créer l'occasion
       circulate(Math.min(Math.max(t, ev.m - 5), arrive - 0.55), null);
       poss = ev.side;
       circulate(arrive - 0.55, { x: spot.x, y: spot.y, side: ev.side });
-      // passe décisive : le tireur reçoit sur le point de tir
+      // passe décisive : le buteur reçoit au point de frappe
       if (holder !== shooter || Math.hypot(ball.x - spot.x, ball.y - spot.y) > 2.5) {
         flyTo(shooter, spot, 40, Math.max(0.18, arrive - 0.12 - t));
       }
-      if (t < arrive) carry(spot, arrive - t); // il arme sa frappe / pose le ballon
-      // issue de la frappe
-      const right = ev.side === "a";
+      if (t < arrive) carry(spot, arrive - t); // il arme sa frappe
+      // issue de la frappe : toujours cadrée vers le but (fond, gants, montant, ou juste à côté)
+      const goalX = right ? 99 : 1;
       let end;
-      if (ev.type === "goal") end = { x: right ? 99.4 : 0.6, y: 29 + rng() * 6 };
-      else if (ev.type === "saved") end = { x: right ? 96.6 : 3.4, y: 29.5 + rng() * 5 };
-      else if (ev.type === "post") end = { x: right ? 98.6 : 1.4, y: rng() < 0.5 ? 26.4 : 37.6 };
-      else end = { x: right ? 99.6 : 0.4, y: rng() < 0.5 ? 17 : 45 };
+      if (ev.type === "goal") end = { x: goalX, y: 29 + rng() * 6 };
+      else if (ev.type === "saved") end = { x: right ? 95 : 5, y: 30 + rng() * 4 };
+      else if (ev.type === "post") end = { x: right ? 97 : 3, y: rng() < 0.5 ? 25.5 : 38.5 };
+      else end = { x: right ? 97.5 : 2.5, y: rng() < 0.5 ? 21 : 43 };
       ev.end = end;
       if (isPen) { t = ev.m; ball = end; } // la scène du gel joue l'élan et le tir
       else push("shot", Math.max(0.1, ev.m - t), end, null);
-      // la suite : engagement, relance du gardien ou dégagement du rebond
+      // reprise du jeu à l'adversaire
       const def = right ? "b" : "a";
       poss = def;
       if (ev.type === "goal") {
+        // engagement au rond central
         holder = rank(outfield(def), { x: 50, y: 32 })[0];
         flyTo(holder, { x: 50, y: 32 }, 44, 0.5);
         push("dead", 0.55, { x: 50, y: 32 }, holder);
-      } else if (ev.type === "post") {
-        holder = rank(outfield(def), ball)[0];
-        flyTo(holder, { x: clamp(holder.hx, 4, 96), y: clamp(holder.hy, 5, 59) }, 30, 0.6);
       } else {
+        // relance courte du gardien (arrêt / six mètres), pas un long ballon aléatoire
         holder = gkOf(def);
-        flyTo(holder, { x: holder.hx, y: holder.hy }, 40, 0.5);
-        push("dead", 0.7, { x: holder.hx, y: holder.hy }, holder);
+        const gx = IN_X(def === "a" ? 12 : 88);
+        flyTo(holder, { x: gx, y: 32 }, 40, 0.5);
+        push("dead", 0.6, { x: gx, y: 32 }, holder);
       }
     }
     circulate(dur - 0.2, null);
@@ -218,13 +241,17 @@
         if (o) { d.x = o.x; d.y = o.y; }
       }
     }
+    // Retrouve le dot du buteur, robuste aux accents/casse/espaces.
+    const norm = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+    const findDot = (side, name) => dots.find((d) => d.side === side && d.name === name)
+      || dots.find((d) => d.side === side && norm(d.name) === norm(name)) || null;
     const events = (cfg.events || [])
       .filter((e) => e.type === "goal" || e.type === "saved" || e.type === "off" || e.type === "post")
       .slice().sort((u, v) => u.m - v.m)
       .map((e) => ({
         m: e.m, type: e.type, side: e.side, pen: !!e.pen, scorer: e.scorer,
         x: clamp(e.x, 4, 96), y: clamp(e.y * 0.64, 6, 58),
-        shooter: dots.find((d) => d.side === e.side && d.name === e.scorer) || null,
+        shooter: findDot(e.side, e.scorer),
         end: null,
       }));
 
@@ -258,7 +285,7 @@
     // léger transfert d'appuis à l'arrêt (lent, pas un tremblement).
     // d.vx/d.vy = vitesse courante (unités/s), sert aussi à orienter le ballon.
     const step = (d, tx, ty, sp, dt, now, wob) => {
-      const w = wob == null ? 0.35 : wob;
+      const w = wob == null ? 0.12 : wob;
       tx += Math.sin((now / 1500) * (0.6 + d.w1) + d.ph1) * w;
       ty += Math.cos((now / 1700) * (0.6 + d.w2) + d.ph2) * w;
       const dx = tx - d.x, dy = ty - d.y, dist = Math.hypot(dx, dy) || 0.0001;

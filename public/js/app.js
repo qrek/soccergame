@@ -3,7 +3,7 @@
   "use strict";
 
   // Version affichée sur l'accueil : permet de vérifier ce qui est déployé.
-  const APP_VERSION = "v41 — survol/action façon FM Mobile (stats + ralenti)";
+  const APP_VERSION = "v42 — moteur de match revu (jeu vers l'avant, vrais buteurs)";
 
   const $ = (id) => document.getElementById(id);
   const state = { code: null, pid: null, snap: null, es: null, mode: "pick" };
@@ -666,24 +666,32 @@
   // Le budget temps réel TOTAL reste identique au match linéaire (+ gels de
   // célébration) : tous les matchs d'une journée finissent donc ensemble et
   // endOf()/ftAll ne changent pas. Le ralenti « vole » juste du temps au survol.
-  const DIR_LEAD = 4;    // minutes de montée montrées avant la frappe
-  const DIR_TAIL = 1.3;  // minutes montrées après une frappe non-but (rebond, relance)
-  const DIR_K = 10;      // l'action défile ~10× plus lentement que le survol
+  const DIR_LEAD = 2;    // minutes de montée montrées avant la frappe (court -> moins d'action)
+  const DIR_TAIL = 0.8;  // minutes montrées après une frappe non-but (rebond, relance)
+  const DIR_K = 3.5;     // l'action défile ~3,5× plus lentement que le survol
+  const DIR_GAP = 3;     // minutes de survol/stats GARANTIES après un but
   function buildDirector(featured, p) {
     const dur = featured.dur || 90;
     const budget = (p.clockMs * dur) / 90;
     const freezes = frzOf(featured, p); // gels plein-arrêt (buts, penalties)
-    // fenêtres d'action autour des frappes dangereuses, fusionnées si proches
+    // fenêtres d'action autour des frappes dangereuses, fusionnées si proches.
+    // Après un but, on IMPOSE un retour aux stats : la montée suivante ne peut
+    // pas démarrer avant DIR_GAP minutes et ne fusionne jamais avec le but.
     const shots = (featured.events || [])
       .filter((e) => e.type === "goal" || e.type === "saved" || e.type === "post")
       .slice().sort((a, b) => a.m - b.m);
     const wins = [];
+    let prevGoal = -99;
     for (const e of shots) {
-      const a = Math.max(0, e.m - DIR_LEAD);
+      let a = Math.max(0, e.m - DIR_LEAD);
       const b = Math.min(dur, e.type === "goal" ? e.m : e.m + DIR_TAIL);
-      const last = wins[wins.length - 1];
-      if (last && a <= last.m1) last.m1 = Math.max(last.m1, b);
-      else wins.push({ m0: a, m1: b });
+      if (a < prevGoal + DIR_GAP) a = Math.min(prevGoal + DIR_GAP, b - 0.3); // stats après le but
+      if (a < b) {
+        const last = wins[wins.length - 1];
+        if (last && a <= last.m1) last.m1 = Math.max(last.m1, b);
+        else wins.push({ m0: a, m1: b });
+      }
+      if (e.type === "goal") prevGoal = e.m;
     }
     const inWin = (x) => wins.some((w) => x > w.m0 && x <= w.m1);
     let aMin = 0; for (const w of wins) aMin += w.m1 - w.m0;

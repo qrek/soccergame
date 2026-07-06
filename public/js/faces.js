@@ -23,15 +23,17 @@
   const cacheGet = (k) => { try { return localStorage.getItem(NS + k); } catch (e) { return null; } };
   const cacheSet = (k, v) => { try { localStorage.setItem(NS + k, v); } catch (e) {} };
 
-  // Portrait factice déterministe (mode test hors ligne).
+  // Portrait factice déterministe (mode test hors ligne) : cadré comme une
+  // vraie photo de buste, plein cadre, pour juger le rendu en fond de carte.
   function stubUrl(name) {
     const hue = [...name].reduce((s, c) => s + c.charCodeAt(0), 0) % 360;
-    const ini = name.split(" ").filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
-    const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'>`
-      + `<rect width='80' height='80' fill='hsl(${hue},45%,34%)'/>`
-      + `<circle cx='40' cy='31' r='13' fill='#ead9c4'/>`
-      + `<path d='M14 80 Q40 52 66 80 Z' fill='#cfd8e0'/>`
-      + `<text x='40' y='75' font-size='12' text-anchor='middle' fill='#fff' font-family='sans-serif' font-weight='700'>${ini}</text></svg>`;
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 80'>`
+      + `<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'>`
+      + `<stop offset='0' stop-color='hsl(${hue},38%,52%)'/><stop offset='1' stop-color='hsl(${hue},42%,22%)'/></linearGradient></defs>`
+      + `<rect width='60' height='80' fill='url(#g)'/>`
+      + `<ellipse cx='30' cy='30' rx='11' ry='13' fill='#e8d3ba'/>`
+      + `<path d='M30 41 q13 2 17 12 l3 27 h-40 l3 -27 q4 -10 17 -12 z' fill='#2c3a46'/>`
+      + `<path d='M19 24 q11 -9 22 0 l-2 -9 q-9 -7 -18 0 z' fill='#3a2e24'/></svg>`;
     return "data:image/svg+xml," + encodeURIComponent(svg);
   }
 

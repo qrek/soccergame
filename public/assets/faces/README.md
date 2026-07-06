@@ -25,3 +25,19 @@ Les megapacks de visages détourés de la communauté FM (sortitoutsi, DF11)
 contiennent la plupart des légendes. Attention : ces images restent soumises
 au droit d'auteur — réserve-les à un usage privé entre amis et évite de les
 publier dans un dépôt ou site public.
+
+## Scraper toutes les photos Wikipédia d'un coup
+
+Depuis ta machine (pas le conteneur de dev, qui n'a pas accès à Wikipédia) :
+
+    node tools/scrape-faces.js
+
+Le script télécharge la photo de chaque joueur (vignette 480 px) ici même,
+remplit `index.json` automatiquement et note licence + auteur de chaque
+image dans `credits.json` (obligation des licences Creative Commons).
+Interruptible : relance-le, il reprend où il s'était arrêté.
+Ensuite : `git add public/assets/faces && git commit && git push`.
+
+Avantages vs la résolution en direct : affichage instantané (pas d'appel
+API chez chaque joueur), cadrage stable, et tu peux remplacer à la main
+les photos qui ne te plaisent pas.
